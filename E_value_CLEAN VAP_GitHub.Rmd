@@ -1,0 +1,784 @@
+---
+title: "E value_CLEAN VAP"
+author: "Yeleen FROMAGE"
+date: "2026-09-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+
+library(dplyr)
+library(readr)
+
+# 1. Load the dataset
+
+df <- readRDS("data_ml_causal_0607.rds")
+
+# 2. Set seed for reproducibility
+set.seed(12345)
+
+# 3. Calculate patient volume per center and shuffle randomly
+centers_volumetry <- df %>%
+  group_by(site_abbreviation) %>%
+  summarise(n_patients = n(), .groups = 'drop') %>%
+  sample_frac(1L) %>% 
+  mutate(cumulative_patients = cumsum(n_patients))
+
+# 4. Identify centers for the external validation cohort
+# Select centers until the cumulative sum strictly exceeds 1000 patients
+threshold_index <- which(centers_volumetry$cumulative_patients > 1000)[1]
+validation_sites <- centers_volumetry$site_abbreviation[1:threshold_index]
+
+# 5. Create the two distinct cohorts (geographical split)
+validation_set <- df %>%
+  filter(site_abbreviation %in% validation_sites)
+
+training_set <- df %>%
+  filter(!(site_abbreviation %in% validation_sites))
+
+# 6. Verification of the spatial split
+cat("\n--- SPATIAL SPLIT REPORT ---\n")
+cat("Number of centers in the training set:", length(unique(training_set$site_abbreviation)), "\n")
+cat("Number of patients in the training set:", nrow(training_set), "\n")
+cat("Number of centers in the validation set:", length(unique(validation_set$site_abbreviation)), "\n")
+cat("Number of patients in the validation set:", nrow(validation_set), "\n")
+
+# 7. Quality control: check for data leakage across sets
+leakage_check <- intersect(unique(training_set$site_abbreviation), unique(validation_set$site_abbreviation))
+
+if(length(leakage_check) == 0) {
+  cat("Spatial independence status: VALID (No overlapping centers)\n")
+} else {
+  cat("WARNING: Data leakage detected between the sets.\n")
+}
+```
+
+```{r}
+# 2. OUTCOME DEFINITIONS
+# -----------------------------------------------------------------------------
+# Primary and secondary outcomes are strictly defined to evaluate both 
+# clinical efficacy and safety (competing risk of mortality).
+
+primary_outcome <- "VFD_28"
+secondary_outcomes <- c("VAPFD_28", "mortality_28d")
+
+# We define a vector of all variables that must be strictly excluded 
+# from the covariate pool to prevent target leakage.
+leakage_variables <- c("VAP_status", primary_outcome, secondary_outcomes, "site_abbreviation")
+
+
+# 3. TREATMENT AND COVARIATES DEFINITION
+# -----------------------------------------------------------------------------
+# List of all VAP prevention measures evaluated in the cohort
+all_prevention_measures <- c(
+  "SODD", 
+  "bed_elevation", 
+  "sedation_vacation", 
+  "thrombosis_proph", 
+  "ulcer_proph", 
+  "oral_care"
+)
+
+# Select the target treatment (W) for the current causal analysis.
+# Example set to SODD. This can be iterated in a loop for other measures.
+target_treatment <- "oral_care"
+
+# The remaining prevention measures are defined as baseline covariates.
+# This adjustment is critical to isolate the specific effect of W 
+# from the synergistic effect of the VAP care bundle.
+other_prevention_measures <- setdiff(all_prevention_measures, target_treatment)
+
+# Define the baseline clinical covariates (patient status at or before ICU admission)
+x_prel <- c(
+  # Demographic and Historical Variables
+  "AGE", "SEX", "Myocardial_infarction", "congestive_heart_failure", 
+  "peripherical_vascular_disease", "COPD", "connective_tissue_disease", 
+  "peptic_ulcer_disease", "liver_disease", "diabetes_mellitus", 
+  "CKD", "solid_tumor", "AIDS", "CVA_TIA_hemiplegia", 
+  "malignant_hemopathies", "CCI_score", 
+  
+  # Severity and Exposure Variables
+  "ICU_admission", "SOFA", "APACHE_II", "Duration_days_before_ICU", 
+  
+  # Pharmacological Treatments (Potential Confounders)
+  "Prescription_of_ATB", "Prescription_of_IS", "LT_corticosteroids", 
+  "calcineurin", "mTOR", "selective_IS", "mAB", "cancer_chemo", "other_IS"
+)
+
+# Construct the final covariate matrix X
+covariates_X <- c(x_prel, other_prevention_measures)
+
+# 4. METHODOLOGICAL QUALITY CONTROL
+# -----------------------------------------------------------------------------
+# Strictly verify that no outcome or site indicator has leaked into matrix X.
+
+cat("\n--- CAUSAL PIPELINE: VARIABLE ALLOCATION REPORT ---\n")
+cat("Target Treatment (W):", target_treatment, "\n")
+cat("Primary Outcome (Y):", primary_outcome, "\n")
+cat("Number of baseline covariates in X:", length(covariates_X), "\n")
+
+leakage_check <- intersect(covariates_X, leakage_variables)
+
+if (length(leakage_check) > 0) {
+  stop("FATAL ERROR: Target leakage detected. Do not proceed with modeling.")
+} else {
+  cat("Integrity Check: PASSED. Zero target leakage in covariate matrix X.\n")
+}
+```
+
+
+```{r}
+# Load necessary libraries for preprocessing and balancing
+library(caret)      # For feature cleaning and cross-validated KNN imputation
+library(WeightIt)   # For Propensity Score and IPW calculation
+library(cobalt)     # For covariate balance diagnostics (Love plots)
+library(dplyr)
+library(tidyr)
+library(recipes)    # State-of-the-art preprocessing and imputation
+library(dplyr)
+library(tidyr)
+
+# -----------------------------------------------------------------------------
+# 4. PREPROCESSING (UPDATED WITH RECIPES)
+# -----------------------------------------------------------------------------
+
+cat("\n--- PIPELINE STEP 4: PREPROCESSING & IMPUTATION ---\n")
+
+training_set <- training_set %>% drop_na(all_of(target_treatment))
+validation_set <- validation_set %>% drop_na(all_of(target_treatment))
+
+cat("Patients with missing treatment assignment excluded.\n")
+
+# A. Feature Cleaning (Zero-variance and high correlation)
+X_train_raw <- training_set[, covariates_X]
+X_valid_raw <- validation_set[, covariates_X]
+
+nzv_info <- caret::nearZeroVar(X_train_raw, saveMetrics = TRUE)
+nzv_vars <- rownames(nzv_info[nzv_info$nzv == TRUE, ])
+cat("Removed zero-variance variables:", length(nzv_vars), "\n")
+
+covariates_cleaned <- setdiff(covariates_X, nzv_vars)
+
+# B. Missing Data Imputation (k-NN) using 'recipes'
+cat("Fitting k-NN imputation model on Training set (k=5)...\n")
+
+imputation_formula <- as.formula(paste("~", paste(c(covariates_cleaned, target_treatment), collapse = "+")))
+
+knn_recipe <- recipe(imputation_formula, data = training_set) %>%
+  step_impute_knn(all_of(covariates_cleaned), neighbors = 5)
+
+knn_prep <- prep(knn_recipe, training = training_set)
+
+train_imputed <- bake(knn_prep, new_data = training_set)
+valid_imputed <- bake(knn_prep, new_data = validation_set)
+
+train_imputed[[target_treatment]] <- as.factor(train_imputed[[target_treatment]])
+valid_imputed[[target_treatment]] <- as.factor(valid_imputed[[target_treatment]])
+
+# C. Re-bind Outcomes
+train_full <- bind_cols(train_imputed, training_set[, c(primary_outcome, secondary_outcomes)])
+valid_full <- bind_cols(valid_imputed, validation_set[, c(primary_outcome, secondary_outcomes)])
+
+cat("Preprocessing and Imputation complete. Ready for IPW balancing.\n")
+
+# -----------------------------------------------------------------------------
+# 5. POSITIVITY AND OVERLAP (4 SCENARIOS TRAIN + 1 VALIDATION)
+# -----------------------------------------------------------------------------
+
+cat("\n--- PIPELINE STEP 5: POSITIVITY AND BALANCING ---\n")
+
+apply_ipw_and_trimming <- function(data, treatment_var, cov_vars, dataset_name = "Cohort", bounds = c(0.05, 0.95)) {
+  
+  formula_ps <- as.formula(paste(treatment_var, "~", paste(cov_vars, collapse = "+")))
+  
+  # A. Propensity Score Estimation initiale
+  suppressWarnings({
+    ps_model <- weightit(
+      formula_ps,
+      data = data,
+      method = "ps",
+      estimand = "ATE"
+    )
+  })
+  
+  data$PS <- ps_model$ps
+  data$IPW <- ps_model$weights
+  
+  # B. Diagnostics pre trimming
+  cat(sprintf("\nDiagnostics for %s (Pre-Trimming):\n", dataset_name))
+  cat("Max IPW weight:", round(max(data$IPW), 2), "\n")
+  
+  # C. Trimming strategy
+  trimmed_data <- data %>%
+    filter(PS >= bounds[1] & PS <= bounds[2])
+  
+  trim_loss <- nrow(data) - nrow(trimmed_data)
+  cat(sprintf("Patients excluded by Propensity Score trimming [%.3f, %.3f]: %d\n", bounds[1], bounds[2], trim_loss))
+  
+  
+  suppressWarnings({
+    ps_model_trimmed <- weightit(
+      formula_ps,
+      data = trimmed_data,
+      method = "ps",
+      estimand = "ATE"
+    )
+  })
+  trimmed_data$IPW_final <- ps_model_trimmed$weights
+  
+  # D. Diagnostics post trimming
+  mean_weight <- mean(trimmed_data$IPW_final)
+  cat("Mean IPW weight post-trimming (Target < 20):", round(mean_weight, 2), "\n")
+  
+  # E. Standardized Mean Differences (SMD)
+  bal_stats <- bal.tab(ps_model_trimmed, un = TRUE)
+  max_smd <- max(abs(bal_stats$Balance$Diff.Adj), na.rm = TRUE)
+  cat("Maximum Adjusted SMD (Target < 0.1):", round(max_smd, 3), "\n")
+  
+  return(list(data = trimmed_data, bal_obj = ps_model_trimmed))
+}
+
+# --- GENERATION OF 4 DERIVATION DATASETS  ---
+
+train_res_full <- apply_ipw_and_trimming(train_full, target_treatment, covariates_cleaned, 
+                                         "Training Set (Full)", bounds = c(0.000, 1.000))
+train_final_full <- train_res_full$data
+
+train_res_025 <- apply_ipw_and_trimming(train_full, target_treatment, covariates_cleaned, 
+                                        "Training Set (2.5-97.5%)", bounds = c(0.025, 0.975))
+train_final_025 <- train_res_025$data
+
+train_res_05 <- apply_ipw_and_trimming(train_full, target_treatment, covariates_cleaned, 
+                                       "Training Set (5-95%)", bounds = c(0.050, 0.950))
+train_final_05 <- train_res_05$data
+
+train_res_10 <- apply_ipw_and_trimming(train_full, target_treatment, covariates_cleaned, 
+                                       "Training Set (10-90%)", bounds = c(0.100, 0.900))
+train_final_10 <- train_res_10$data
+
+# --- GENERATION VALIDATION DATASET  ---
+
+valid_res_full <- apply_ipw_and_trimming(valid_full, target_treatment, covariates_cleaned, 
+                                         "Validation Set (Full)", bounds = c(0.000, 1.000))
+valid_final_full <- valid_res_full$data
+
+# 2. Validation Set (2.5-97.5%)
+valid_res_025 <- apply_ipw_and_trimming(valid_full, target_treatment, covariates_cleaned, 
+                                        "Validation Set (2.5-97.5%)", bounds = c(0.025, 0.975))
+valid_final_025 <- valid_res_025$data
+
+# 3. Validation Set (5-95%)
+valid_res_05 <- apply_ipw_and_trimming(valid_full, target_treatment, covariates_cleaned, 
+                                       "Validation Set (5-95%)", bounds = c(0.050, 0.950))
+valid_final_05 <- valid_res_05$data
+
+
+# 3. Validation Set (10-90%)
+valid_res_10 <- apply_ipw_and_trimming(valid_full, target_treatment, covariates_cleaned, 
+                                       "Validation Set (10-90%)", bounds = c(0.100, 0.900))
+valid_final_10 <- valid_res_10$data
+
+
+# --- DIAGNOSTICS  (LOVE PLOTS) ---
+
+# Love plot validation full
+love.plot(valid_res_full$bal_obj, 
+          threshold = 0.1, 
+          title = "Covariate Balance - Validation Set (Full)",
+          colors = c("red", "blue"))
+
+# Love plot  validation 2.5
+love.plot(valid_res_025$bal_obj, 
+          threshold = 0.1, 
+          title = "Covariate Balance - Validation Set (2.5-97.5%)",
+          colors = c("red", "blue"))
+
+# Love plot validation  5
+love.plot(valid_res_05$bal_obj, 
+          threshold = 0.1, 
+          title = "Covariate Balance - Validation Set (5-95%)",
+          colors = c("red", "blue"))
+
+# Love plot validation 10
+love.plot(valid_res_10$bal_obj, 
+          threshold = 0.1, 
+          title = "Covariate Balance - Validation Set (10-90%)",
+          colors = c("red", "blue"))
+
+
+# Love plots 4 derivations sets
+love.plot(train_res_full$bal_obj, 
+          threshold = 0.1, 
+          title = "Covariate Balance - Training Set (Full)",
+          colors = c("red", "blue"))
+
+love.plot(train_res_025$bal_obj, 
+          threshold = 0.1, 
+          title = "Covariate Balance - Training Set (2.5-97.5%)",
+          colors = c("red", "blue"))
+
+love.plot(train_res_05$bal_obj, 
+          threshold = 0.1, 
+          title = "Covariate Balance - Training Set (5-95%)",
+          colors = c("red", "blue"))
+
+love.plot(train_res_10$bal_obj, 
+          threshold = 0.1, 
+          title = "Covariate Balance - Training Set (10-90%)",
+          colors = c("red", "blue"))
+```
+
+```{r}
+# =============================================================================
+# 5.bis CALIBRATION  ( PROPENSITY SCORE )
+# =============================================================================
+cat("\n--- PIPELINE STEP 5.bis: PROPENSITY SCORE CALIBRATION ---\n")
+
+
+evaluate_ps_calibration <- function(data, treatment_var, ps_var, dataset_name = "Cohort") {
+  
+  # 1. Extraction
+  obs_trt <- as.numeric(as.character(data[[treatment_var]]))
+  
+  if(any(!obs_trt %in% c(0, 1))) {
+    obs_trt <- ifelse(obs_trt == max(obs_trt, na.rm = TRUE), 1, 0)
+  }
+  pred_ps <- data[[ps_var]]
+  
+  # 2.  Brier Sore
+  brier_score <- mean((pred_ps - obs_trt)^2, na.rm = TRUE)
+  
+  cat(sprintf("\nDiagnostics pour %s :\n", dataset_name))
+  cat(sprintf("Brier Score : %.4f \n", brier_score))
+  
+  # 3. Preparation data for curve (deciles)
+  calib_data <- data.frame(Observed = obs_trt, Predicted = pred_ps) %>%
+    filter(!is.na(Predicted)) %>%
+    mutate(Decile = ntile(Predicted, 10)) %>%
+    group_by(Decile) %>%
+    summarise(
+      Mean_Predicted = mean(Predicted, na.rm = TRUE),
+      Observed_Proportion = mean(Observed, na.rm = TRUE),
+      Count = n(),
+      .groups = 'drop'
+    )
+  
+  # 4. Plot generation
+  calib_plot <- ggplot(calib_data, aes(x = Mean_Predicted, y = Observed_Proportion)) +
+    # ( perfect calibration )
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+    
+ 
+    geom_point(color = "#2980B9", size = 3) +
+    geom_line(color = "#2980B9", linewidth = 1) +
+    
+    #  (LOESS) 
+    geom_smooth(data = data.frame(Observed = obs_trt, Predicted = pred_ps),
+                aes(x = Predicted, y = Observed),
+                method = "loess", se = FALSE, color = "#C0392B", linetype = "dotted", linewidth = 0.8) +
+    
+    scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+    labs(
+      title = paste("Propensity Score Calibration -", dataset_name),
+      subtitle = sprintf("Brier Score = %.3f", brier_score),
+      x = "Mean Predicted Probability of Treatment",
+      y = "Observed Proportion of Treatment"
+    ) +
+    theme_classic(base_size = 12)
+  
+  print(calib_plot)
+  
+  return(list(Brier_Score = brier_score, Plot = calib_plot))
+}
+
+# --- Application  ---
+
+
+calib_train <- evaluate_ps_calibration(
+  data = train_final_full, 
+  treatment_var = target_treatment, 
+  ps_var = "PS", 
+  dataset_name = "Training Set (Full)"
+)
+
+
+calib_valid <- evaluate_ps_calibration(
+  data = valid_final_full, 
+  treatment_var = target_treatment, 
+  ps_var = "PS", 
+  dataset_name = "Validation Set (Full)"
+)
+```
+
+
+```{r}
+# -----------------------------------------------------------------------------
+# 1. POSITIVITY
+# -----------------------------------------------------------------------------
+cat("\n--- 1. POSITIVITY ---\n")
+
+
+df_full <- bind_rows(train_final_full, valid_final_full)
+
+global_balanced_results <- apply_ipw_and_trimming(
+  data = df_full, 
+  treatment_var = target_treatment, 
+  cov_vars = covariates_cleaned, 
+  dataset_name = "Cohorte Globale"
+)
+df_final <- global_balanced_results$data
+
+```
+
+```{r}
+
+p0_ulcer <- valid_final_full %>%
+  filter(as.numeric(as.character(ulcer_proph)) == 0) %>%   # control arm
+  summarise(p0 = mean(as.numeric(as.character(mortality_28d)),
+                       na.rm = TRUE)) %>%
+  pull(p0)
+
+cat("p0 ulcer_proph :", p0_ulcer, "\n")
+
+```
+
+```{r}
+
+p0_ulcer <- valid_final_full %>%
+  filter(as.numeric(as.character(thrombosis_proph)) == 0) %>%   # control arm
+  summarise(p0 = mean(as.numeric(as.character(mortality_28d)),
+                       na.rm = TRUE)) %>%
+  pull(p0)
+
+cat("p0 thrombosis_proph :", p0_ulcer, "\n")
+
+```
+
+
+
+
+```{r}
+# =============================================================================
+# CLEAN-VAP — E-VALUE v7 (VanderWeele & Ding, Ann Intern Med 2017)
+#
+# =============================================================================
+
+library(EValue)
+library(dplyr)
+library(ggplot2)
+library(ranger)
+
+dir.create("CLEAN_VAP_outputs/evalue", recursive = TRUE, showWarnings = FALSE)
+
+# =============================================================================
+# DEFINITION OF THE ESTIMATION POPULATION (ATE)
+# =============================================================================
+# Exact dataset used to fit the GRFs for global effects
+ate_population <- df_final
+
+# =============================================================================
+# EMPIRICAL DIAGNOSTIC — QUANTIFICATION OF THE OLS LIMIT (SAP documentation)
+# =============================================================================
+cat("\n=== EMPIRICAL DIAGNOSTIC — VAPFD_28 / VFD_28 (SAP documentation) ===\n")
+
+diagnostic_normality <- function(var, data, label) {
+  x <- data[[var]]
+  pct_zero <- mean(x == 0,  na.rm = TRUE) * 100
+  pct_max  <- mean(x == max(x, na.rm = TRUE), na.rm = TRUE) * 100
+  pct_mass <- pct_zero + pct_max
+
+  cat(sprintf("\n%s :\n", label))
+  cat(sprintf("  Total N                : %d\n", sum(!is.na(x))))
+  cat(sprintf("  %% at lower bound       : %.1f%%\n", pct_zero))
+  cat(sprintf("  %% at upper bound       : %.1f%%\n", pct_max))
+  cat(sprintf("  %% total mass at bounds : %.1f%%\n", pct_mass))
+
+  data.frame(Outcome = label, Pct_zero = round(pct_zero, 1),
+             Pct_max = round(pct_max, 1), Pct_mass_bounds = round(pct_mass, 1))
+}
+
+diag_vapfd <- diagnostic_normality("VAPFD_28", ate_population, "VAPFD_28")
+diag_vfd   <- diagnostic_normality("VFD_28",   ate_population, "VFD_28")
+diagnostic_table <- bind_rows(diag_vapfd, diag_vfd)
+
+write.csv(diagnostic_table, "CLEAN_VAP_outputs/evalue/diagnostic_normality_continuous_outcomes.csv", row.names = FALSE)
+cat("\nDiagnostic exported for the SAP.\n=====================================================================\n\n")
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+clip01 <- function(p, label = "") {
+  n_out <- sum(p < 0 | p > 1, na.rm = TRUE)
+  clipped <- pmax(0, pmin(1, p))
+  if (n_out > 0) warning(sprintf("Clipping applied for %s: %d value(s) outside [0,1].", label, n_out))
+  clipped
+}
+
+safe_evalues_RR <- function(rr, rr_lo, rr_hi) {
+  bounds <- sort(c(rr_lo, rr_hi))
+  tryCatch({
+    evalues.RR(est = rr, lo = bounds[1], hi = bounds[2])
+  }, error = function(e) {
+    warning("evalues.RR failed: ", conditionMessage(e)); NULL
+  })
+}
+
+# -----------------------------------------------------------------------------
+# MANUAL WORKAROUND (SMD-to-RR) FOR THE evalues.OLS BUG
+# -----------------------------------------------------------------------------
+compute_evalue_continuous_manual <- function(est, sd_outcome, label, se = NULL, ci_lo = NULL, ci_hi = NULL) {
+  est_num <- as.numeric(est)
+  ci_lo_num <- as.numeric(ci_lo)
+  ci_hi_num <- as.numeric(ci_hi)
+
+  if (is.null(ci_lo_num) || is.null(ci_hi_num)) {
+    se_used <- as.numeric(se)
+    ci_lo_num <- est_num - 1.96 * se_used
+    ci_hi_num <- est_num + 1.96 * se_used
+  }
+
+  d_est <- abs(est_num) / sd_outcome
+  d_lo  <- abs(ci_lo_num) / sd_outcome
+  d_hi  <- abs(ci_hi_num) / sd_outcome
+
+  rr_est <- exp(0.91 * d_est)
+  rr_lo  <- exp(0.91 * min(d_lo, d_hi))
+  rr_hi  <- exp(0.91 * max(d_lo, d_hi))
+
+  ev <- safe_evalues_RR(rr_est, rr_lo, rr_hi)
+
+  if (!is.null(ev)) {
+    evalue_point <- ev["E-values", "point"]
+    evalue_ci    <- ev["E-values", "lower"]
+    
+    cat(sprintf("  %-50s E-val(pt)=%.2f | E-val(CI)=%.2f\n", label, evalue_point, evalue_ci))
+
+    return(data.frame(
+      Analysis = label, Type = "Continuous (SMD->RR approx)", Estimate = round(est_num, 4),
+      CI_Lo = round(ci_lo_num, 4), CI_Hi = round(ci_hi_num, 4),
+      Evalue_point = round(evalue_point, 2), Evalue_CI = round(evalue_ci, 2), stringsAsFactors = FALSE
+    ))
+  }
+  NULL
+}
+
+# -----------------------------------------------------------------------------
+# BINARY E-VALUE (OPTION B: RD -> RR)
+# -----------------------------------------------------------------------------
+compute_evalue_binary <- function(ard, ci_lo, ci_hi, p0_counterfactual, label) {
+  p0    <- clip01(p0_counterfactual, paste0("p0_", label))
+  p1    <- clip01(p0 + ard, paste0("p1_", label))
+  p1_lo <- clip01(p0 + ci_lo, paste0("p1_lo_", label))
+  p1_hi <- clip01(p0 + ci_hi, paste0("p1_hi_", label))
+
+  rr    <- p1 / p0
+  rr_lo <- p1_lo / p0
+  rr_hi <- p1_hi / p0
+
+  ev <- safe_evalues_RR(rr, rr_lo, rr_hi)
+
+  if (!is.null(ev)) {
+    evalue_point <- ev["E-values", "point"]
+    evalue_ci    <- ev["E-values", ifelse(ard < 0, "upper", "lower")]
+
+    cat(sprintf("  %-50s p0=%.4f p1=%.4f | E-val(pt)=%.2f | E-val(CI)=%.2f\n",
+                label, p0, p1, evalue_point, evalue_ci))
+
+    return(data.frame(
+      Analysis = label, Type = "Binary (RD converted to RR)",
+      Estimate = round(ard, 4), CI_Lo = round(ci_lo, 4), CI_Hi = round(ci_hi, 4),
+      Evalue_point = round(evalue_point, 2), Evalue_CI = round(evalue_ci, 2),
+      stringsAsFactors = FALSE
+    ))
+  }
+  NULL
+}
+
+extract_p0_counterfactual <- function(outcome_var, treatment_var, covariates, data, subset_idx = NULL) {
+  data_sub <- if (is.null(subset_idx)) data else data[subset_idx, ]
+  Y <- as.numeric(as.character(data_sub[[outcome_var]]))
+  W <- as.numeric(as.character(data_sub[[treatment_var]]))
+  if (any(!W %in% c(0, 1))) W <- ifelse(W == max(W), 1, 0)
+
+  X <- data_sub[, covariates, drop = FALSE]
+  df_nuis <- data.frame(X, Y = Y, W = as.factor(W))
+
+  fit_Q0 <- ranger(Y ~ ., data = df_nuis[df_nuis$W == "0", !names(df_nuis) %in% "W"],
+                   num.threads = 2, seed = 2026)
+  Q0_hat <- predict(fit_Q0, data = X)$predictions
+  mean(Q0_hat, na.rm = TRUE)
+}
+
+# =============================================================================
+# GENERIC LOOP
+# =============================================================================
+compute_evalue_treatment <- function(treatment_var, ate_table, estimator_label, population, covariates) {
+  cat(sprintf("\n--- %s (%s) ---\n", treatment_var, estimator_label))
+
+  n0 <- sum(as.numeric(as.character(population[[treatment_var]])) == 0, na.rm = TRUE)
+  n1 <- sum(as.numeric(as.character(population[[treatment_var]])) == 1, na.rm = TRUE)
+  stopifnot("Error: n0 or n1 is zero. Check encoding (0/1 expected)." = n0 > 0 & n1 > 0)
+
+  results_list <- lapply(seq_len(nrow(ate_table)), function(i) {
+    row <- ate_table[i, ]
+    out_name <- as.character(row$outcome)
+
+    if (out_name == "mortality_28d") {
+      p0 <- extract_p0_counterfactual(
+        outcome_var = out_name, treatment_var = treatment_var,
+        covariates = covariates, data = population
+      )
+      compute_evalue_binary(
+        ard = as.numeric(row$est), ci_lo = as.numeric(row$ci_lo), ci_hi = as.numeric(row$ci_hi),
+        p0_counterfactual = p0, label = sprintf("ATE (%s) %s — %s", estimator_label, treatment_var, out_name)
+      )
+    } else {
+      sd_out <- sd(as.numeric(as.character(population[[out_name]])), na.rm = TRUE)
+      
+      compute_evalue_continuous_manual(
+        est = as.numeric(row$est), sd_outcome = sd_out, ci_lo = as.numeric(row$ci_lo), ci_hi = as.numeric(row$ci_hi),
+        label = sprintf("ATE (%s) %s — %s", estimator_label, treatment_var, out_name)
+      )
+    }
+  })
+  bind_rows(Filter(Negate(is.null), results_list))
+}
+
+# =============================================================================
+# EXECUTIONS
+# =============================================================================
+evalue_results <- data.frame()
+
+# -----------------------------------------------------------------------------
+# 1. ATE ULCER PROPHYLAXIS 
+# -----------------------------------------------------------------------------
+ate_table_ulcer <- data.frame(
+  outcome = c("VAPFD_28", "VFD_28", "mortality_28d"),
+  est     = c(-1.27, -1.82, 0.0364),
+  ci_lo   = c(-2.14, -2.57, 0.0049),
+  ci_hi   = c(-0.41, -1.06, 0.0678)
+)
+
+res_ulcer <- compute_evalue_treatment(
+  treatment_var = "ulcer_proph", ate_table = ate_table_ulcer, estimator_label = "GRF",
+  population = ate_population, covariates = covariates_cleaned
+)
+evalue_results <- bind_rows(evalue_results, res_ulcer)
+
+# -----------------------------------------------------------------------------
+# 2. ATE THROMBOSIS PROPHYLAXIS
+# -----------------------------------------------------------------------------
+ate_table_dvt <- data.frame(
+  outcome = c("VAPFD_28", "VFD_28", "mortality_28d"),
+  est     = c(4.44, 2.44, -0.1644),
+  ci_lo   = c(3.07, 1.31, -0.2142),
+  ci_hi   = c(5.80, 3.56, -0.1145)
+)
+
+res_dvt <- compute_evalue_treatment(
+  treatment_var = "thrombosis_proph", ate_table = ate_table_dvt, estimator_label = "GRF",
+  population = ate_population, covariates = covariates_cleaned
+)
+evalue_results <- bind_rows(evalue_results, res_dvt)
+
+
+# =============================================================================
+# 3. CATE SEDATION VACATION 
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# PRELIMINARY CHECK (Traceability)
+# -----------------------------------------------------------------------------
+df_cate_vapfd_check <- readRDS("Valid_2.5_97.5_with_ITE_sedation_vacation_VAPFD_28.rds")
+df_cate_vapfd_check <- df_cate_vapfd_check %>% mutate(ITE_tertile = ntile(ITE_stabilized, 3))
+
+cat("\n--- DIRECTIONALITY CHECK ITE vs VAPFD_28 ---\n")
+suppressWarnings(print(cor.test(df_cate_vapfd_check$ITE_stabilized, df_cate_vapfd_check$VAPFD_28, method = "spearman")))
+cat("Mean VAPFD_28 Tertile 1 (Most negative):", mean(df_cate_vapfd_check$VAPFD_28[df_cate_vapfd_check$ITE_tertile == 1], na.rm = TRUE), "\n")
+cat("Mean VAPFD_28 Tertile 3 (Most positive):", mean(df_cate_vapfd_check$VAPFD_28[df_cate_vapfd_check$ITE_tertile == 3], na.rm = TRUE), "\n")
+
+# -----------------------------------------------------------------------------
+# 3.A. CATE VAPFD_28 (Harm Signal)
+# -----------------------------------------------------------------------------
+cat("\n--- 3.A CATE SEDATION VACATION (VAPFD_28) ---\n")
+df_cate_vapfd <- readRDS("Valid_2.5_97.5_with_ITE_sedation_vacation_VAPFD_28.rds")
+df_cate_vapfd <- df_cate_vapfd %>% mutate(ITE_tertile = ntile(ITE_stabilized, 3))
+
+target_tertile_vapfd <- 1 # Tertile 1 isolates the greatest loss of VAP-free days
+pop_sed_vapfd_impact <- df_cate_vapfd %>% filter(ITE_tertile == target_tertile_vapfd)
+
+cate_table_sedation_vapfd <- data.frame(
+  outcome = "VAPFD_28", 
+  est = c(-2.69), 
+  ci_lo = c(-4.66), 
+  ci_hi = c(-0.47)
+)
+
+res_sedation_vapfd <- compute_evalue_treatment(
+  treatment_var = "sedation_vacation", 
+  ate_table = cate_table_sedation_vapfd, 
+  estimator_label = sprintf("CATE - Harm Signal (Tertile %d, VAPFD_28 reduction)", target_tertile_vapfd), 
+  population = pop_sed_vapfd_impact, 
+  covariates = covariates_cleaned
+)
+evalue_results <- bind_rows(evalue_results, res_sedation_vapfd)
+
+# -----------------------------------------------------------------------------
+# 3.B. CATE MORTALITY 28D (Harm Signal)
+# -----------------------------------------------------------------------------
+cat("\n--- 3.B CATE SEDATION VACATION (28D MORTALITY) ---\n")
+df_cate_mort <- readRDS("Valid_10-90_with_ITE_sedation_vacation_mortality_28d.rds")
+df_cate_mort <- df_cate_mort %>% mutate(ITE_tertile = ntile(ITE_stabilized, 3))
+
+target_tertile_mort <- 3 # Tertile 3 isolates the highest mortality increase (most positive ITE)
+pop_sed_mort_impact <- df_cate_mort %>% filter(ITE_tertile == target_tertile_mort)
+
+cate_table_sedation_mort <- data.frame(
+  outcome = "mortality_28d", 
+  est     = c(0.1264), 
+  ci_lo   = c(0.0456),
+  ci_hi   = c(0.2084)  
+)
+
+res_sedation_mort <- compute_evalue_treatment(
+  treatment_var = "sedation_vacation", 
+  ate_table = cate_table_sedation_mort, 
+  estimator_label = sprintf("CATE - Harm Signal (Tertile %d, Mortality increase)", target_tertile_mort), 
+  population = pop_sed_mort_impact, 
+  covariates = covariates_cleaned
+)
+evalue_results <- bind_rows(evalue_results, res_sedation_mort)
+
+# =============================================================================
+# SUMMARY TABLE
+# =============================================================================
+cat("\n--- SUMMARY TABLE ---\n")
+print(evalue_results, row.names = FALSE)
+write.csv(evalue_results, "CLEAN_VAP_outputs/evalue/evalue_summary_v7.csv", row.names = FALSE)
+
+# =============================================================================
+# METHODOLOGICAL JUSTIFICATION FOR THE STATISTICAL ANALYSIS PLAN (SAP)
+# =============================================================================
+cat("\n=== SUGGESTED SAP TEXT ===\n\n")
+
+sap_text <- sprintf(
+  "VAPFD-28 and VFD-28 exhibited %.1f%% and %.1f%% mass at boundary values (0 and 28 days), respectively, consistent with composite time-to-event endpoints commonly seen in critical care. E-values for continuous outcomes were computed using the SMD-to-RR approximation (VanderWeele & Ding, Ann Intern Med 2017, Technical Appendix) due to a reproducible internal error in EValue::evalues.OLS() (package version 4.1.4, R 4.3.1), isolated to its internal S3 dispatch and independent of the input data. Given the documented departure from normality, these E-values should be interpreted as approximate rather than exact bounds on the required unmeasured confounding strength.",
+  diag_vapfd$Pct_mass_bounds, diag_vfd$Pct_mass_bounds
+)
+
+cat(sap_text, "\n\n")
+writeLines(sap_text, "CLEAN_VAP_outputs/evalue/sap_justification_text.txt")
+```
+
+
+
+
+
+

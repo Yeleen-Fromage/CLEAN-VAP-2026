@@ -1,0 +1,1987 @@
+---
+title: "Figures_CLEAN VAP"
+author: "Yeleen FROMAGE"
+date: "2026-09-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#################################
+##### SEDATION###########
+###################################
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# =============================================================================
+# 1. EFFECT ESTIMATES - SEDATION VACATION
+# =============================================================================
+
+# A. VAPFD-28
+df_vapfd_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard", "ps-BART", "GRF", "Double ML"),
+  Estimate = c(1.02922728, 0.62139937, 0.01299043, 0.96025734, 0.78689585, 0.54424752, 0.50159550, 0.28904438, 0.48073344),
+  CI_Lower = c(0.39461114, -0.01612365, -0.72328522, 0.57266191, 0.39524952, -0.17130464, -0.22790080, -0.39803816, -0.19742983),
+  CI_Upper = c(1.6638434, 1.2589224, 0.7492661, 1.3478528, 1.1785422, 1.2597997, 1.2310918, 0.9761269, 1.1588967),
+  Outcome = "VAPFD-28", Population = "Full cohort"
+)
+
+df_vapfd_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard", "ps-BART", "GRF", "Double ML"),
+  Estimate = c(1.0297599, 0.6346944, 0.1352331, 1.0081376, 0.6357984, 0.5409705, 0.5219773, 0.3032984, 0.4638072),
+  CI_Lower = c(0.3949401, -0.0031574, -0.5834193, 0.6196193, 0.2436529, -0.1944694, -0.2132119, -0.3787590, -0.2204168),
+  CI_Upper = c(1.6645798, 1.2725463, 0.8538855, 1.3966559, 1.0279438, 1.2764104, 1.2571664, 0.9853557, 1.1480312),
+  Outcome = "VAPFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# B. VFD-28
+df_vfd_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard", "ps-BART", "GRF", "Double ML"),
+  Estimate = c(0.5666907, 0.4268105, 0.1139908, 0.4214621, 0.4720261, 0.3691589, 0.2889140, 0.2442230, 0.0406327),
+  CI_Lower = c(0.03550015, -0.11342338, -0.52581363, 0.09080792, 0.14107096, -0.27671165, -0.36094008, -0.36820682, -0.55569754),
+  CI_Upper = c(1.0978813, 0.9670444, 0.7537953, 0.7521163, 0.8029812, 1.0150294, 0.9387680, 0.8566529, 0.6369629),
+  Outcome = "VFD-28", Population = "Full cohort"
+)
+
+df_vfd_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard", "ps-BART", "GRF", "Double ML"),
+  Estimate = c(0.5668047, 0.4393611, 0.1210960, 0.4437906, 0.3241092, 0.3742223, 0.2858849, 0.2709667, 0.1358675),
+  CI_Lower = c(0.03550983, -0.10109260, -0.50676214, 0.11310886, -0.00908268, -0.28749489, -0.37090848, -0.33335784, -0.45423716),
+  CI_Upper = c(1.0980996, 0.9798149, 0.7489541, 0.7744724, 0.6573011, 1.0359394, 0.9426783, 0.8752913, 0.7259722),
+  Outcome = "VFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# C. 28-day Mortality (Multiplied by 100 for percentage scale)
+df_mort_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard", "ps-BART", "GRF", "Double ML"),
+  Estimate = c(-2.301108, -0.710574, 1.734497, -0.498933, -0.420948, -0.478383, -0.419934, 0.468848, -0.268211),
+  CI_Lower = c(-4.626545, -3.026188, -0.930261, -1.908101, -1.842811, -3.249546, -3.082583, -2.009713, -2.725482),
+  CI_Upper = c(0.024329, 1.605039, 4.399255, 0.910235, 1.000915, 2.292780, 2.242714, 2.947409, 2.189059),
+  Outcome = "28-day mortality", Population = "Full cohort"
+)
+
+df_mort_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard", "ps-BART", "GRF", "Double ML"),
+  Estimate = c(-2.302367, -0.755314, 1.089018, -0.575567, -0.062583, -0.347511, -0.512579, 0.465439, -0.299267),
+  CI_Lower = c(-4.628622, -3.072198, -1.493144, -1.986117, -1.486785, -3.038663, -3.250484, -2.005016, -2.776382),
+  CI_Upper = c(0.023889, 1.561570, 3.671179, 0.834984, 1.361619, 2.343642, 2.225325, 2.935894, 2.177848),
+  Outcome = "28-day mortality", Population = "5%-95% trimmed cohort"
+)
+
+# =============================================================================
+# 2. DATA AGGREGATION AND FORMATTING
+# =============================================================================
+df_all <- bind_rows(df_vapfd_full, df_vapfd_trim, df_vfd_full, df_vfd_trim, df_mort_full, df_mort_trim)
+
+df_all <- df_all %>%
+  mutate(
+    Method = case_when(
+      grepl("OLS, unadjusted", Approach) ~ "OLS, unadjusted",
+      grepl("OLS, adjusted", Approach) ~ "OLS, adjusted",
+      grepl("AIPW", Approach) ~ "Augmented inverse probability weighting",
+      grepl("TMLE \\(Random Forest\\)", Approach) ~ "TMLE, random forest",
+      grepl("TMLE \\(Super Learner\\)", Approach) ~ "TMLE, Super Learner",
+      grepl("BART Standard", Approach) ~ "Bayesian additive regression trees",
+      grepl("ps-BART", Approach) ~ "Propensity-score BART",
+      grepl("GRF", Approach) ~ "Generalized random forest",
+      grepl("Double ML", Approach) ~ "Double machine learning",
+      TRUE ~ Approach
+    )
+  )
+
+method_order <- c(
+  "OLS, unadjusted", "OLS, adjusted", "Augmented inverse probability weighting",
+  "TMLE, random forest", "TMLE, Super Learner", "Bayesian additive regression trees",
+  "Propensity-score BART", "Generalized random forest", "Double machine learning"
+)
+
+df_all <- df_all %>%
+  mutate(
+    Method = factor(Method, levels = rev(method_order)),
+    Population = factor(Population, levels = c("Full cohort", "5%-95% trimmed cohort")),
+    Outcome = factor(Outcome, levels = c("VAPFD-28", "VFD-28", "28-day mortality")),
+    estimate_label = sprintf("%.1f (%.1f to %.1f)", Estimate, CI_Lower, CI_Upper)
+  )
+
+# =============================================================================
+# 3. PLOTTING FUNCTION
+# =============================================================================
+make_outcome_panel <- function(data, outcome_name, x_label, show_y_axis = TRUE) {
+
+  dat <- data %>% filter(Outcome == outcome_name)
+  n_methods <- length(levels(dat$Method))
+
+  min_ci <- min(dat$CI_Lower, na.rm = TRUE)
+  max_ci <- max(dat$CI_Upper, na.rm = TRUE)
+  val_min <- min(0, min_ci)
+  val_max <- max(0, max_ci)
+
+  x_breaks_dyn <- scales::pretty_breaks(n = 5)(c(val_min, val_max))
+  x_limits_dyn <- c(min(x_breaks_dyn), max(x_breaks_dyn))
+
+  dat <- dat %>%
+    group_by(Method) %>%
+    mutate(
+      n_estimands = n(),
+      y_base = as.numeric(Method),
+      y_dodge = case_when(
+        n_estimands == 1 ~ y_base,
+        Population == "Full cohort" ~ y_base - 0.16,
+        Population == "5%-95% trimmed cohort" ~ y_base + 0.16
+      )
+    ) %>%
+    ungroup()
+
+  ymin_vals <- seq(0.5, n_methods, by = 2)
+  background <- data.frame(ymin = ymin_vals, ymax = ymin_vals + 1)
+
+  p_forest <- ggplot(dat, aes(x = Estimate, y = y_dodge, color = Population, shape = Population)) +
+    geom_rect(data = background, aes(ymin = ymin, ymax = ymax, xmin = -Inf, xmax = Inf), inherit.aes = FALSE, fill = "#F7F7F7") +
+    geom_vline(xintercept = 0, linewidth = 0.45, color = "#555555") +
+    geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.15, linewidth = 0.65) +
+    geom_point(size = 2.5) +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_shape_manual(values = c("Full cohort" = 15, "5%-95% trimmed cohort" = 16)) +
+    scale_x_continuous(limits = x_limits_dyn, breaks = x_breaks_dyn, expand = c(0, 0)) +
+    scale_y_continuous(breaks = 1:n_methods, labels = levels(dat$Method), limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    labs(x = x_label, y = NULL) +
+    theme_classic(base_size = 10) +
+    theme(
+      text = element_text(family = "sans", color = "black", face = "plain"),
+      axis.text.y = if(show_y_axis) element_text(size = 9.0, color = "black") else element_blank(),
+      axis.text.x = element_text(size = 8.5, color = "black"),
+      axis.title.x = element_text(size = 9.5, margin = margin(t = 8)),
+      axis.line.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.x = element_line(linewidth = 0.4, color = "black"),
+      axis.ticks.x = element_line(linewidth = 0.4, color = "black"),
+      legend.position = "none",
+      plot.margin = margin(t = 2, r = 3, b = 2, l = 3)
+    )
+  
+  p_text <- ggplot(dat, aes(x = 0, y = y_dodge, color = Population)) +
+    geom_text(aes(label = estimate_label), hjust = 0, size = 2.75, show.legend = FALSE) +
+    annotate("text", x = 0, y = n_methods + 1.0, label = "Estimate (95% CI)", hjust = 0, fontface = "plain", size = 2.8, color = "black") +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    theme_void() +
+    theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 0))
+  
+  p_main <- p_forest + p_text + plot_layout(widths = c(5.4, 2.0))
+  return(p_main)
+}
+
+# =============================================================================
+# 4. FINAL ASSEMBLY
+# =============================================================================
+panel_vapfd <- make_outcome_panel(df_all, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd <- make_outcome_panel(df_all, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mortality <- make_outcome_panel(df_all, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_main <- (panel_vapfd | panel_vfd | panel_mortality) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+#ggsave( filename = "Figure_Main_Causal_Effects_Sedation.tiff", plot = figure_main, width = 16.5, height = 5.8, units = "in", dpi = 600, compression = "lzw" )
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# =============================================================================
+# 1. ATT/ATO ESTIMATES
+# =============================================================================
+# A. Mortality (ATT/ATO)
+df_mort_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "TMLE (ATT)", "Double ML (ATT)", "AIPW (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(2.1, -0.9, -56.1, 0.1, 104.3, 0.1, 0.1),
+  CI_Lower = c(-0.6, -3.2, -57.6, -2.7, 94.8, -2.9, -2.9),
+  CI_Upper = c(4.7, 1.5, -54.7, 2.8, 113.8, 3.1, 3.1),
+  Outcome = "28-day mortality"
+)
+
+# B. VAPFD-28
+df_vapfd_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "TMLE (ATT)", "Double ML (ATT)", "AIPW (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(-0.256, 0.628, 15.809, 0.334, -2.359, 0.449, 0.444),
+  CI_Lower = c(-1.007, -0.008, 15.415, -0.427, -5.067, -0.301, -0.326),
+  CI_Upper = c(0.495, 1.265, 16.203, 1.095, 0.349, 1.200, 1.214),
+  Outcome = "VAPFD-28"
+)
+
+# C. VFD-28 (TMLE ATT removed due to artifact)
+df_vfd_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "Double ML (ATT)", "AIPW (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(-0.073, 0.440, -0.304, -2.013, 0.336, 0.262),
+  CI_Lower = c(-0.759, -0.108, -0.967, -4.634, -0.359, -0.448),
+  CI_Upper = c(0.613, 0.988, 0.359, 0.608, 1.032, 0.971),
+  Outcome = "VFD-28"
+)
+df_all_supp_raw <- bind_rows(df_vapfd_att, df_vfd_att, df_mort_att)
+
+# =============================================================================
+# 2. ARTIFACT CLEANING
+# =============================================================================
+df_all_supp <- df_all_supp_raw %>%
+  mutate(
+    Estimand = if_else(grepl("ATO", Approach), "ATO", "ATT"),
+    Method_Raw = gsub(" \\(ATT\\)| \\(ATO\\)", "", Approach),
+    Method = case_when(
+      Method_Raw == "AIPW" ~ "Augmented inverse probability weighting",
+      Method_Raw == "TMLE" ~ "TMLE, random forest",
+      Method_Raw == "BART Standard" ~ "Bayesian additive regression trees",
+      Method_Raw == "ps-BART" ~ "Propensity-score BART",
+      Method_Raw == "GRF" ~ "Generalized random forest",
+      Method_Raw == "Double ML" ~ "Double machine learning",
+      TRUE ~ Method_Raw
+    )
+  ) %>%
+  filter(
+    !(Outcome == "28-day mortality" & (Estimate > 50 | Estimate < -50 | CI_Upper > 50 | CI_Lower < -50)),
+    !(Outcome %in% c("VAPFD-28", "VFD-28") & (Estimate > 10 | Estimate < -10))
+  )
+
+# =============================================================================
+# 3. FORMATTING
+# =============================================================================
+method_order_supp <- c(
+  "Augmented inverse probability weighting", "TMLE, random forest",
+  "Bayesian additive regression trees", "Propensity-score BART",
+  "Generalized random forest", "Double machine learning"
+)
+
+df_all_supp <- df_all_supp %>%
+  mutate(
+    Method = factor(Method, levels = rev(method_order_supp)),
+    Estimand = factor(Estimand, levels = c("ATT", "ATO")),
+    Outcome = factor(Outcome, levels = c("VAPFD-28", "VFD-28", "28-day mortality")),
+    estimate_label = sprintf("%.1f (%.1f to %.1f)", Estimate, CI_Lower, CI_Upper)
+  )
+
+# =============================================================================
+# 4. PLOTTING FUNCTION
+# =============================================================================
+make_supp_panel <- function(data, outcome_name, x_label, show_y_axis = TRUE) {
+  dat <- data %>% filter(Outcome == outcome_name)
+  n_methods <- length(levels(dat$Method))
+  min_ci <- min(dat$CI_Lower, na.rm = TRUE)
+  max_ci <- max(dat$CI_Upper, na.rm = TRUE)
+  val_min <- min(0, min_ci)
+  val_max <- max(0, max_ci)
+  x_breaks_dyn <- scales::pretty_breaks(n = 5)(c(val_min, val_max))
+  x_limits_dyn <- c(min(x_breaks_dyn), max(x_breaks_dyn))
+  
+  dat <- dat %>%
+    group_by(Method) %>%
+    mutate(
+      n_estimands = n(),
+      y_base = as.numeric(Method),
+      y_dodge = case_when(
+        n_estimands == 1 ~ y_base,
+        Estimand == "ATO" ~ y_base - 0.16,
+        Estimand == "ATT" ~ y_base + 0.16
+      )
+    ) %>%
+    ungroup()
+    
+  ymin_vals <- seq(0.5, n_methods, by = 2)
+  background <- data.frame(ymin = ymin_vals, ymax = ymin_vals + 1)
+  
+  p_forest <- ggplot(dat, aes(x = Estimate, y = y_dodge, color = Estimand, shape = Estimand)) +
+    geom_rect(data = background, aes(ymin = ymin, ymax = ymax, xmin = -Inf, xmax = Inf), inherit.aes = FALSE, fill = "#F7F7F7") +
+    geom_vline(xintercept = 0, linewidth = 0.45, color = "#555555") +
+    geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.15, linewidth = 0.65) +
+    geom_point(size = 2.5) +
+    scale_color_manual(values = c("ATT" = "#C0392B", "ATO" = "#2980B9")) +
+    scale_shape_manual(values = c("ATT" = 15, "ATO" = 16)) +
+    scale_x_continuous(limits = x_limits_dyn, breaks = x_breaks_dyn, expand = c(0, 0)) +
+    scale_y_continuous(breaks = 1:n_methods, labels = levels(dat$Method), limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    labs(x = x_label, y = NULL) +
+    theme_classic(base_size = 10) +
+    theme(
+      text = element_text(family = "sans", color = "black", face = "plain"),
+      axis.text.y = if(show_y_axis) element_text(size = 9.0, color = "black") else element_blank(),
+      axis.text.x = element_text(size = 8.5, color = "black"),
+      axis.title.x = element_text(size = 9.5, margin = margin(t = 8)),
+      axis.line.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.x = element_line(linewidth = 0.4, color = "black"),
+      axis.ticks.x = element_line(linewidth = 0.4, color = "black"),
+      legend.position = "none",
+      plot.margin = margin(t = 2, r = 3, b = 2, l = 3)
+    )
+
+  p_text <- ggplot(dat, aes(x = 0, y = y_dodge, color = Estimand)) +
+    geom_text(aes(label = estimate_label), hjust = 0, size = 2.75, show.legend = FALSE) +
+    annotate("text", x = 0, y = n_methods + 1.0, label = "Estimate (95% CI)", hjust = 0, fontface = "plain", size = 2.8, color = "black") +
+    scale_color_manual(values = c("ATT" = "#C0392B", "ATO" = "#2980B9")) +
+    scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    theme_void() +
+    theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 0))
+
+  p_main <- p_forest + p_text + plot_layout(widths = c(5.4, 2.0))
+  return(p_main)
+}
+
+# =============================================================================
+# 5. FINAL ASSEMBLY
+# =============================================================================
+panel_vapfd_supp <- make_supp_panel(df_all_supp, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd_supp <- make_supp_panel(df_all_supp, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mort_supp <- make_supp_panel(df_all_supp, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_supp <- (panel_vapfd_supp | panel_vfd_supp | panel_mort_supp) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank()) +
+  labs(
+    caption = "Extreme estimates from TMLE and AIPW (e.g., AIPW ATT for mortality = 104%) are considered artifacts of positivity violations and are excluded from the graphical display to maintain scale."
+  )
+
+# Save plot
+#ggsave(
+#  filename = "Figure_Supplementary_ATT_ATO_Sedation_3.tiff",
+#  plot = figure_supp, width = 16.5, height = 5.0, units = "in", dpi = 600, compression = "lzw"
+#)
+```
+
+
+```{r}
+library(patchwork)
+library(ggplot2)
+
+# =============================================================================
+# 1. UPPER ROW: MAIN CAUSAL EFFECTS - ATE (PANEL A)
+# =============================================================================
+panel_vapfd <- make_outcome_panel(df_all, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd <- make_outcome_panel(df_all, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mortality <- make_outcome_panel(df_all, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_main <- (panel_vapfd | panel_vfd | panel_mortality) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# =============================================================================
+# 2. LOWER ROW: SUPPLEMENTARY EFFECTS - ATT / ATO (PANEL B)
+# =============================================================================
+panel_vapfd_supp <- make_supp_panel(df_all_supp, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd_supp <- make_supp_panel(df_all_supp, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mort_supp <- make_supp_panel(df_all_supp, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_supp <- (panel_vapfd_supp | panel_vfd_supp | panel_mort_supp) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# =============================================================================
+# 3. OVERALL VERTICAL ASSEMBLY AND TIFF EXPORT
+# =============================================================================
+# Encapsulation with wrap_elements preserves the distinct legend for each row
+figure_combined_sedation <- (
+  wrap_elements(full = figure_main) / 
+  wrap_elements(full = figure_supp)
+) +
+  plot_annotation(
+    tag_levels = "A",
+    caption = "Extreme estimates from TMLE and AIPW (e.g., AIPW ATT for mortality = 104%) are considered artifacts of positivity violations and are excluded from the graphical display to maintain scale.",
+    theme = theme(
+      plot.caption = element_text(hjust = 0, size = 10, color = "black", margin = margin(t = 10))
+    )
+  ) &
+  theme(
+    plot.tag = element_text(size = 14, color = "black")
+  )
+
+# High-resolution save (height adjusted to 10.8 inches for the 2 rows)
+ggsave(
+  filename = "Figure_Combined_Main_and_Supp_Sedation.tiff",
+  plot = figure_combined_sedation, 
+  device = "tiff",
+  width = 16.5, 
+  height = 10.8, 
+  units = "in", 
+  dpi = 600, 
+  compression = "lzw",
+  bg = "white"
+)
+```
+
+
+
+#################################
+###### THROMBO ##################
+#################################
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# =============================================================================
+# 1. EFFECT ESTIMATES - THROMBOPROPHYLAXIS
+# =============================================================================
+# A. Mortality (Full and Trimmed) - Multiplied by 100 for percentage scale
+df_mort_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-17.635177, -18.218180, -13.056484, -43.635421, -28.089164, -14.138983, -13.889421, -2.205185, -12.160365),
+  CI_Lower = c(-20.07444, -21.84076, -18.28428, -44.95867, -29.37271, -18.99910, -18.86513, -15.02170, -15.47663),
+  CI_Upper = c(-15.195919, -14.595600, -7.828685, -42.312171, -26.805615, -9.278867, -8.913715, 10.611335, -8.844097),
+  Outcome = "28-day mortality", Population = "Full cohort"
+)
+
+df_mort_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-18.87207, -16.51141, -18.70992, -31.66851, -23.22596, -16.42166, -16.21127, -16.44095, -16.26752),
+  CI_Lower = c(-22.11705, -20.76158, -26.08949, -33.74435, -25.35238, -21.17716, -21.40328, -21.42564, -21.05890),
+  CI_Upper = c(-15.62710, -12.26123, -11.33036, -29.59267, -21.09953, -11.66616, -11.01926, -11.45626, -11.47613),
+  Outcome = "28-day mortality", Population = "5%-95% trimmed cohort"
+)
+
+# B. VAPFD-28 (Full and Trimmed)
+df_vapfd_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(4.5220191, 4.7963909, 3.3368083, 11.4100743, 7.3904132, 3.6435240, 3.5329530, 0.1815324, 3.0168185),
+  CI_Lower = c(3.854857, 3.799041, 1.914031, 11.047942, 7.037103, 2.455604, 2.365680, -3.446212, 2.089273),
+  CI_Upper = c(5.189182, 5.793741, 4.759586, 11.772207, 7.743723, 4.831444, 4.700226, 3.809277, 3.944364),
+  Outcome = "VAPFD-28", Population = "Full cohort"
+)
+
+df_vapfd_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(4.816794, 4.422863, 5.042505, 8.747834, 6.493937, 4.143719, 4.058248, 4.436482, 4.306867),
+  CI_Lower = c(3.929464, 3.252720, 3.082550, 8.177010, 5.908075, 2.895261, 2.691791, 3.074323, 2.995625),
+  CI_Upper = c(5.704124, 5.593006, 7.002461, 9.318657, 7.079800, 5.392177, 5.424704, 5.798641, 5.618109),
+  Outcome = "VAPFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# C. VFD-28 (Full and Trimmed)
+df_vfd_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(2.8499535, 2.8084462, 1.8660987, 6.9952168, 0.9696721, 2.1156526, 2.0279034, -1.0344144, 1.4720761),
+  CI_Lower = c(2.2886015, 1.9632965, 0.6993387, 6.6966485, 0.6680960, 1.1085714, 0.9762246, -4.2719783, 0.7445997),
+  CI_Upper = c(3.411305, 3.653596, 3.032859, 7.293785, 1.271248, 3.122734, 3.079582, 2.203149, 2.199553),
+  Outcome = "VFD-28", Population = "Full cohort"
+)
+
+df_vfd_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(2.896822, 2.736873, 2.570175, 5.861645, 3.954436, 2.568549, 2.544677, 2.435715, 2.357459),
+  CI_Lower = c(2.153766, 1.749729, 0.983873, 5.381202, 3.463451, 1.494902, 1.443590, 1.309505, 1.290560),
+  CI_Upper = c(3.639879, 3.724017, 4.156477, 6.342087, 4.445422, 3.642196, 3.645764, 3.561925, 3.424358),
+  Outcome = "VFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# =============================================================================
+# 2. DATA AGGREGATION AND FORMATTING
+# =============================================================================
+df_all <- bind_rows(df_vapfd_full, df_vapfd_trim, df_vfd_full, df_vfd_trim, df_mort_full, df_mort_trim)
+
+df_all <- df_all %>%
+  mutate(
+    Method = case_when(
+      grepl("OLS, unadjusted", Approach) ~ "OLS, unadjusted",
+      grepl("OLS, adjusted", Approach) ~ "OLS, adjusted",
+      grepl("AIPW", Approach) ~ "Augmented inverse probability weighting",
+      grepl("TMLE \\(Random Forest\\)", Approach) ~ "TMLE, random forest",
+      grepl("TMLE \\(Super Learner\\)", Approach) ~ "TMLE, Super Learner",
+      grepl("BART Standard", Approach) ~ "Bayesian additive regression trees",
+      grepl("ps-BART", Approach) ~ "Propensity-score BART",
+      grepl("GRF", Approach) ~ "Generalized random forest",
+      grepl("Double ML", Approach) ~ "Double machine learning",
+      TRUE ~ Approach
+    )
+  )
+
+method_order <- c(
+  "OLS, unadjusted", "OLS, adjusted", "Augmented inverse probability weighting",
+  "TMLE, random forest", "TMLE, Super Learner", "Bayesian additive regression trees",
+  "Propensity-score BART", "Generalized random forest", "Double machine learning"
+)
+
+df_all <- df_all %>%
+  mutate(
+    Method = factor(Method, levels = rev(method_order)),
+    Population = factor(Population, levels = c("Full cohort", "5%-95% trimmed cohort")),
+    Outcome = factor(Outcome, levels = c("VAPFD-28", "VFD-28", "28-day mortality")),
+    estimate_label = sprintf("%.1f (%.1f to %.1f)", Estimate, CI_Lower, CI_Upper)
+  )
+
+# =============================================================================
+# 3. PLOTTING FUNCTION
+# =============================================================================
+make_outcome_panel <- function(data, outcome_name, x_label, show_y_axis = TRUE) {
+  dat <- data %>% filter(Outcome == outcome_name)
+  n_methods <- length(levels(dat$Method))
+  min_ci <- min(dat$CI_Lower, na.rm = TRUE)
+  max_ci <- max(dat$CI_Upper, na.rm = TRUE)
+  val_min <- min(0, min_ci)
+  val_max <- max(0, max_ci)
+  x_breaks_dyn <- scales::pretty_breaks(n = 5)(c(val_min, val_max))
+  x_limits_dyn <- c(min(x_breaks_dyn), max(x_breaks_dyn))
+  
+  dat <- dat %>%
+    group_by(Method) %>%
+    mutate(
+      n_estimands = n(),
+      y_base = as.numeric(Method),
+      y_dodge = case_when(
+        n_estimands == 1 ~ y_base,
+        Population == "Full cohort" ~ y_base - 0.16,
+        Population == "5%-95% trimmed cohort" ~ y_base + 0.16
+      )
+    ) %>%
+    ungroup()
+    
+  ymin_vals <- seq(0.5, n_methods, by = 2)
+  background <- data.frame(ymin = ymin_vals, ymax = ymin_vals + 1)
+  
+  p_forest <- ggplot(dat, aes(x = Estimate, y = y_dodge, color = Population, shape = Population)) +
+    geom_rect(data = background, aes(ymin = ymin, ymax = ymax, xmin = -Inf, xmax = Inf), inherit.aes = FALSE, fill = "#F7F7F7") +
+    geom_vline(xintercept = 0, linewidth = 0.45, color = "#555555") +
+    geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.15, linewidth = 0.65) +
+    geom_point(size = 2.5) +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_shape_manual(values = c("Full cohort" = 15, "5%-95% trimmed cohort" = 16)) +
+    scale_x_continuous(limits = x_limits_dyn, breaks = x_breaks_dyn, expand = c(0, 0)) +
+    scale_y_continuous(breaks = 1:n_methods, labels = levels(dat$Method), limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    labs(x = x_label, y = NULL) +
+    theme_classic(base_size = 10) +
+    theme(
+      text = element_text(family = "sans", color = "black", face = "plain"),
+      axis.text.y = if(show_y_axis) element_text(size = 9.0, color = "black") else element_blank(),
+      axis.text.x = element_text(size = 8.5, color = "black"),
+      axis.title.x = element_text(size = 9.5, margin = margin(t = 8)),
+      axis.line.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.x = element_line(linewidth = 0.4, color = "black"),
+      axis.ticks.x = element_line(linewidth = 0.4, color = "black"),
+      legend.position = "none",
+      plot.margin = margin(t = 2, r = 3, b = 2, l = 3)
+    )
+
+  p_text <- ggplot(dat, aes(x = 0, y = y_dodge, color = Population)) +
+    geom_text(aes(label = estimate_label), hjust = 0, size = 2.75, show.legend = FALSE) +
+    annotate("text", x = 0, y = n_methods + 1.0, label = "Estimate (95% CI)", hjust = 0, fontface = "plain", size = 2.8, color = "black") +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    theme_void() +
+    theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 0))
+
+  p_main <- p_forest + p_text + plot_layout(widths = c(5.4, 2.0))
+  return(p_main)
+}
+
+# =============================================================================
+# 4. FINAL ASSEMBLY
+# =============================================================================
+panel_vapfd <- make_outcome_panel(df_all, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd <- make_outcome_panel(df_all, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mortality <- make_outcome_panel(df_all, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_main <- (panel_vapfd | panel_vfd | panel_mortality) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# ggsave(filename = "Figure_Main_Causal_Effects_Thrombo.tiff", plot = figure_main, width = 16.5, height = 5.8, units = "in", dpi = 600, compression = "lzw")
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# =============================================================================
+# 1. ATT/ATO ESTIMATES
+# =============================================================================
+# A. Mortality (ATT/ATO) - Multiplied by 100 for percentage scale
+df_mort_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "TMLE (ATT)", "Double ML (ATT)", "AIPW (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(-2.3, -13.7, -6.9, -9.6, 66.5, -11.7, -13.7),
+  CI_Lower = c(-14.2, -17.6, -8.0, -13.4, 50.3, -17.9, -18.9),
+  CI_Upper = c(9.6, -9.7, -5.7, -5.9, 82.7, -5.5, -8.4),
+  Outcome = "28-day mortality"
+)
+
+# B. VAPFD-28
+df_vapfd_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "TMLE (ATT)", "Double ML (ATT)", "AIPW (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(14.7, 36.48, 17.32, 23.43, 34.75, 34.05, 34.25),
+  CI_Lower = c(-31.68, 25.67, 14.13, 13.06, -8.11, 20.09, 21.09),
+  CI_Upper = c(34.62, 47.28, 20.51, 33.80, 77.61, 48.01, 47.40),
+  Outcome = "VAPFD-28"
+)
+
+# C. VFD-28
+df_vfd_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "TMLE (ATT)", "Double ML (ATT)", "AIPW (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(-13.02, 22.28, 7.91, 7.03, 11.16, 19.16, 18.54),
+  CI_Lower = c(-44.79, 13.00, 5.10, -15.9, -21.14, 6.87, 6.25),
+  CI_Upper = c(18.74, 31.55, 10.72, 15.64, 43.46, 31.45, 30.82),
+  Outcome = "VFD-28"
+)
+df_all_supp_raw <- bind_rows(df_vapfd_att, df_vfd_att, df_mort_att)
+
+# =============================================================================
+# 2. ARTIFACT CLEANING
+# =============================================================================
+df_all_supp <- df_all_supp_raw %>%
+  mutate(
+    Estimand = if_else(grepl("ATO", Approach), "ATO", "ATT"),
+    Method_Raw = gsub(" \\(ATT\\)| \\(ATO\\)", "", Approach),
+    Method = case_when(
+      Method_Raw == "AIPW" ~ "Augmented inverse probability weighting",
+      Method_Raw == "TMLE" ~ "TMLE, random forest",
+      Method_Raw == "BART Standard" ~ "Bayesian additive regression trees",
+      Method_Raw == "ps-BART" ~ "Propensity-score BART",
+      Method_Raw == "GRF" ~ "Generalized random forest",
+      Method_Raw == "Double ML" ~ "Double machine learning",
+      TRUE ~ Method_Raw
+    )
+  ) %>%
+  filter(
+    !(Outcome == "28-day mortality" & (Estimate > 50 | Estimate < -50 | CI_Upper > 50 | CI_Lower < -50)),
+    !(Outcome %in% c("VAPFD-28", "VFD-28") & (Estimate > 50 | Estimate < -50))
+  )
+
+# =============================================================================
+# 3. FORMATTING
+# =============================================================================
+method_order_supp <- c(
+  "Augmented inverse probability weighting", "TMLE, random forest",
+  "Bayesian additive regression trees", "Propensity-score BART",
+  "Generalized random forest", "Double machine learning"
+)
+df_all_supp <- df_all_supp %>%
+  mutate(
+    Method = factor(Method, levels = rev(method_order_supp)),
+    Estimand = factor(Estimand, levels = c("ATT", "ATO")),
+    Outcome = factor(Outcome, levels = c("VAPFD-28", "VFD-28", "28-day mortality")),
+    estimate_label = sprintf("%.1f (%.1f to %.1f)", Estimate, CI_Lower, CI_Upper)
+  )
+
+# =============================================================================
+# 4. PLOTTING FUNCTION
+# =============================================================================
+make_supp_panel <- function(data, outcome_name, x_label, show_y_axis = TRUE) {
+  dat <- data %>% filter(Outcome == outcome_name)
+  n_methods <- length(levels(dat$Method))
+  min_ci <- min(dat$CI_Lower, na.rm = TRUE)
+  max_ci <- max(dat$CI_Upper, na.rm = TRUE)
+  val_min <- min(0, min_ci)
+  val_max <- max(0, max_ci)
+  x_breaks_dyn <- scales::pretty_breaks(n = 5)(c(val_min, val_max))
+  x_limits_dyn <- c(min(x_breaks_dyn), max(x_breaks_dyn))
+  
+  dat <- dat %>%
+    group_by(Method) %>%
+    mutate(
+      n_estimands = n(),
+      y_base = as.numeric(Method),
+      y_dodge = case_when(
+        n_estimands == 1 ~ y_base,
+        Estimand == "ATO" ~ y_base - 0.16,
+        Estimand == "ATT" ~ y_base + 0.16
+      )
+    ) %>%
+    ungroup()
+    
+  ymin_vals <- seq(0.5, n_methods, by = 2)
+  background <- data.frame(ymin = ymin_vals, ymax = ymin_vals + 1)
+  
+  p_forest <- ggplot(dat, aes(x = Estimate, y = y_dodge, color = Estimand, shape = Estimand)) +
+    geom_rect(data = background, aes(ymin = ymin, ymax = ymax, xmin = -Inf, xmax = Inf), inherit.aes = FALSE, fill = "#F7F7F7") +
+    geom_vline(xintercept = 0, linewidth = 0.45, color = "#555555") +
+    geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.15, linewidth = 0.65) +
+    geom_point(size = 2.5) +
+    scale_color_manual(values = c("ATT" = "#C0392B", "ATO" = "#2980B9")) +
+    scale_shape_manual(values = c("ATT" = 15, "ATO" = 16)) +
+    scale_x_continuous(limits = x_limits_dyn, breaks = x_breaks_dyn, expand = c(0, 0)) +
+    scale_y_continuous(breaks = 1:n_methods, labels = levels(dat$Method), limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    labs(x = x_label, y = NULL) +
+    theme_classic(base_size = 10) +
+    theme(
+      text = element_text(family = "sans", color = "black", face = "plain"),
+      axis.text.y = if(show_y_axis) element_text(size = 9.0, color = "black") else element_blank(),
+      axis.text.x = element_text(size = 8.5, color = "black"),
+      axis.title.x = element_text(size = 9.5, margin = margin(t = 8)),
+      axis.line.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.x = element_line(linewidth = 0.4, color = "black"),
+      axis.ticks.x = element_line(linewidth = 0.4, color = "black"),
+      legend.position = "none",
+      plot.margin = margin(t = 2, r = 3, b = 2, l = 3)
+    )
+
+  p_text <- ggplot(dat, aes(x = 0, y = y_dodge, color = Estimand)) +
+    geom_text(aes(label = estimate_label), hjust = 0, size = 2.75, show.legend = FALSE) +
+    annotate("text", x = 0, y = n_methods + 1.0, label = "Estimate (95% CI)", hjust = 0, fontface = "plain", size = 2.8, color = "black") +
+    scale_color_manual(values = c("ATT" = "#C0392B", "ATO" = "#2980B9")) +
+    scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    theme_void() +
+    theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 0))
+
+  p_main <- p_forest + p_text + plot_layout(widths = c(5.4, 2.0))
+  return(p_main)
+}
+
+# =============================================================================
+# 5. FINAL ASSEMBLY
+# =============================================================================
+panel_vapfd_supp <- make_supp_panel(df_all_supp, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd_supp <- make_supp_panel(df_all_supp, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mort_supp <- make_supp_panel(df_all_supp, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_supp <- (panel_vapfd_supp | panel_vfd_supp | panel_mort_supp) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank()) +
+  labs(
+    caption = "Extreme estimates from TMLE and AIPW are considered artifacts of positivity violations and are excluded from the graphical display to maintain scale."
+  )
+
+# Save plot
+ggsave(
+  filename = "Figure_Supplementary_ATT_ATO_Thrombo.tiff",
+  plot = figure_supp, width = 16.5, height = 5.0, units = "in", dpi = 600, compression = "lzw"
+)
+```
+
+########################################
+######### ULCER ########
+####################################
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# =============================================================================
+# 1. EFFECT ESTIMATES - ULCER PROPHYLAXIS
+# =============================================================================
+# A. Mortality (Full and Trimmed) - Multiplied by 100 for percentage scale
+df_mort_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-6.3269660, 3.2628634, 3.9997386, 10.0124027, 5.0909583, 3.1156188, 4.1132193, 2.8805538, 0.6170744),
+  CI_Lower = c(-8.5522414, 0.3197647, 0.7326246, 8.7777486, 3.8362678, -0.5500370, 0.3055696, -0.2177238, -2.0055733),
+  CI_Upper = c(-4.101691, 6.205962, 7.266853, 11.247057, 6.345649, 6.781275, 7.920869, 5.978831, 3.239722),
+  Outcome = "28-day mortality", Population = "Full cohort"
+)
+df_mort_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-2.841608, 3.070863, 3.898926, 13.396338, 11.209902, 3.026214, 4.177859, 3.643514, 2.759617),
+  CI_Lower = c(-5.2793619, 0.1525676, 0.7499104, 12.0510757, 9.8758717, -0.4794725, 0.8045618, 0.4991280, -0.1419564),
+  CI_Upper = c(-0.4038533, 5.9891592, 7.0479418, 14.7416007, 12.5439329, 6.5319011, 7.5511554, 6.7879003, 5.6611912),
+  Outcome = "28-day mortality", Population = "5%-95% trimmed cohort"
+)
+
+# B. VAPFD-28 (Full and Trimmed)
+df_vapfd_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(1.4680219, -1.1879947, -1.3363023, -4.5523794, -2.8865769, -1.0918840, -1.3643026, -1.0712836, -0.4259186),
+  CI_Lower = c(0.8600648, -1.9982737, -2.2393948, -4.8925242, -3.2245129, -2.0232966, -2.3290048, -1.9264967, -1.1509548),
+  CI_Upper = c(2.0759789, -0.3777157, -0.4332099, -4.2122345, -2.5486409, -0.1604714, -0.3996004, -0.2160704, 0.2991176),
+  Outcome = "VAPFD-28", Population = "Full cohort"
+)
+df_vapfd_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(0.5422902, -1.1352746, -1.2962585, -4.6414156, -4.1463893, -1.0906726, -1.4151372, -1.2749321, -0.9585353),
+  CI_Lower = c(-0.1242986, -1.9398490, -2.1666666, -5.0140840, -4.5161809, -2.0187427, -2.3680994, -2.1426694, -1.7580991),
+  CI_Upper = c(1.2088790, -0.3307002, -0.4258503, -4.2687473, -3.7765976, -0.1626026, -0.4621750, -0.4071947, -0.1589715),
+  Outcome = "VAPFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# C. VFD-28 (Full and Trimmed)
+df_vfd_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(0.4237279, -1.7924467, -2.0045717, -5.7674964, -4.7150669, -1.6189371, -1.7862274, -1.7508969, -1.0780267),
+  CI_Lower = c(-0.08567695, -2.47907319, -2.80549604, -6.06630192, -5.00887036, -2.41688314, -2.60929917, -2.50671297, -1.71814886),
+  CI_Upper = c(0.9331328, -1.1058202, -1.2036474, -5.46869092, -4.4212633, -0.8209911, -0.9631555, -0.9950809, -0.4379046),
+  Outcome = "VFD-28", Population = "Full cohort"
+)
+df_vfd_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-0.2869672, -1.7329302, -1.8905552, -5.4549595, -4.1785661, -1.6031689, -1.7457561, -1.8188450, -1.2582354),
+  CI_Lower = c(-0.8539868, -2.4241425, -2.6458692, -5.7843103, -4.5020967, -2.3843625, -2.5604158, -2.5740240, -1.9607618),
+  CI_Upper = c(0.2800523, -1.0417180, -1.1352412, -5.1256087, -3.8550355, -0.8219753, -0.9310964, -1.0636661, -0.5557089),
+  Outcome = "VFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# =============================================================================
+# 2. DATA AGGREGATION AND FORMATTING
+# =============================================================================
+df_all <- bind_rows(df_vapfd_full, df_vapfd_trim, df_vfd_full, df_vfd_trim, df_mort_full, df_mort_trim)
+
+df_all <- df_all %>%
+  mutate(
+    Method = case_when(
+      grepl("OLS, unadjusted", Approach) ~ "OLS, unadjusted",
+      grepl("OLS, adjusted", Approach) ~ "OLS, adjusted",
+      grepl("AIPW", Approach) ~ "Augmented inverse probability weighting",
+      grepl("TMLE \\(Random Forest\\)", Approach) ~ "TMLE, random forest",
+      grepl("TMLE \\(Super Learner\\)", Approach) ~ "TMLE, Super Learner",
+      grepl("BART Standard", Approach) ~ "Bayesian additive regression trees",
+      grepl("ps-BART", Approach) ~ "Propensity-score BART",
+      grepl("GRF", Approach) ~ "Generalized random forest",
+      grepl("Double ML", Approach) ~ "Double machine learning",
+      TRUE ~ Approach
+    )
+  )
+
+method_order <- c(
+  "OLS, unadjusted", "OLS, adjusted", "Augmented inverse probability weighting",
+  "TMLE, random forest", "TMLE, Super Learner", "Bayesian additive regression trees",
+  "Propensity-score BART", "Generalized random forest", "Double machine learning"
+)
+
+df_all <- df_all %>%
+  mutate(
+    Method = factor(Method, levels = rev(method_order)),
+    Population = factor(Population, levels = c("Full cohort", "5%-95% trimmed cohort")),
+    Outcome = factor(Outcome, levels = c("VAPFD-28", "VFD-28", "28-day mortality")),
+    estimate_label = sprintf("%.1f (%.1f to %.1f)", Estimate, CI_Lower, CI_Upper)
+  )
+
+# =============================================================================
+# 3. PLOTTING FUNCTION
+# =============================================================================
+make_outcome_panel <- function(data, outcome_name, x_label, show_y_axis = TRUE) {
+  dat <- data %>% filter(Outcome == outcome_name)
+  n_methods <- length(levels(dat$Method))
+  min_ci <- min(dat$CI_Lower, na.rm = TRUE)
+  max_ci <- max(dat$CI_Upper, na.rm = TRUE)
+  val_min <- min(0, min_ci)
+  val_max <- max(0, max_ci)
+  x_breaks_dyn <- scales::pretty_breaks(n = 5)(c(val_min, val_max))
+  x_limits_dyn <- c(min(x_breaks_dyn), max(x_breaks_dyn))
+  
+  dat <- dat %>%
+    group_by(Method) %>%
+    mutate(
+      n_estimands = n(),
+      y_base = as.numeric(Method),
+      y_dodge = case_when(
+        n_estimands == 1 ~ y_base,
+        Population == "Full cohort" ~ y_base - 0.16,
+        Population == "5%-95% trimmed cohort" ~ y_base + 0.16
+      )
+    ) %>%
+    ungroup()
+    
+  ymin_vals <- seq(0.5, n_methods, by = 2)
+  background <- data.frame(ymin = ymin_vals, ymax = ymin_vals + 1)
+  
+  p_forest <- ggplot(dat, aes(x = Estimate, y = y_dodge, color = Population, shape = Population)) +
+    geom_rect(data = background, aes(ymin = ymin, ymax = ymax, xmin = -Inf, xmax = Inf), inherit.aes = FALSE, fill = "#F7F7F7") +
+    geom_vline(xintercept = 0, linewidth = 0.45, color = "#555555") +
+    geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.15, linewidth = 0.65) +
+    geom_point(size = 2.5) +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_shape_manual(values = c("Full cohort" = 15, "5%-95% trimmed cohort" = 16)) +
+    scale_x_continuous(limits = x_limits_dyn, breaks = x_breaks_dyn, expand = c(0, 0)) +
+    scale_y_continuous(breaks = 1:n_methods, labels = levels(dat$Method), limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    labs(x = x_label, y = NULL) +
+    theme_classic(base_size = 10) +
+    theme(
+      text = element_text(family = "sans", color = "black", face = "plain"),
+      axis.text.y = if(show_y_axis) element_text(size = 9.0, color = "black") else element_blank(),
+      axis.text.x = element_text(size = 8.5, color = "black"),
+      axis.title.x = element_text(size = 9.5, margin = margin(t = 8)),
+      axis.line.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.x = element_line(linewidth = 0.4, color = "black"),
+      axis.ticks.x = element_line(linewidth = 0.4, color = "black"),
+      legend.position = "none",
+      plot.margin = margin(t = 2, r = 3, b = 2, l = 3)
+    )
+
+  p_text <- ggplot(dat, aes(x = 0, y = y_dodge, color = Population)) +
+    geom_text(aes(label = estimate_label), hjust = 0, size = 2.75, show.legend = FALSE) +
+    annotate("text", x = 0, y = n_methods + 1.0, label = "Estimate (95% CI)", hjust = 0, fontface = "plain", size = 2.8, color = "black") +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    theme_void() +
+    theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 0))
+
+  p_main <- p_forest + p_text + plot_layout(widths = c(5.4, 2.0))
+  return(p_main)
+}
+
+# =============================================================================
+# 4. FINAL ASSEMBLY
+# =============================================================================
+panel_vapfd <- make_outcome_panel(df_all, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd <- make_outcome_panel(df_all, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mortality <- make_outcome_panel(df_all, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_main <- (panel_vapfd | panel_vfd | panel_mortality) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# ggsave(filename = "Figure_Main_Causal_Effects_Ulcer.tiff", plot = figure_main, width = 16.5, height = 5.8, units = "in", dpi = 600, compression = "lzw")
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# =============================================================================
+# 1. EFFECT ESTIMATES - THROMBOPROPHYLAXIS (PANEL A)
+# =============================================================================
+df_mort_full_thrombo <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-17.635177, -18.218180, -13.056484, -43.635421, -28.089164, -14.138983, -13.889421, -2.205185, -12.160365),
+  CI_Lower = c(-20.07444, -21.84076, -18.28428, -44.95867, -29.37271, -18.99910, -18.86513, -15.02170, -15.47663),
+  CI_Upper = c(-15.195919, -14.595600, -7.828685, -42.312171, -26.805615, -9.278867, -8.913715, 10.611335, -8.844097),
+  Outcome = "28-day mortality", Population = "Full cohort"
+)
+df_mort_trim_thrombo <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-18.87207, -16.51141, -18.70992, -31.66851, -23.22596, -16.42166, -16.21127, -16.44095, -16.26752),
+  CI_Lower = c(-22.11705, -20.76158, -26.08949, -33.74435, -25.35238, -21.17716, -21.40328, -21.42564, -21.05890),
+  CI_Upper = c(-15.62710, -12.26123, -11.33036, -29.59267, -21.09953, -11.66616, -11.01926, -11.45626, -11.47613),
+  Outcome = "28-day mortality", Population = "5%-95% trimmed cohort"
+)
+df_vapfd_full_thrombo <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(4.5220191, 4.7963909, 3.3368083, 11.4100743, 7.3904132, 3.6435240, 3.5329530, 0.1815324, 3.0168185),
+  CI_Lower = c(3.854857, 3.799041, 1.914031, 11.047942, 7.037103, 2.455604, 2.365680, -3.446212, 2.089273),
+  CI_Upper = c(5.189182, 5.793741, 4.759586, 11.772207, 7.743723, 4.831444, 4.700226, 3.809277, 3.944364),
+  Outcome = "VAPFD-28", Population = "Full cohort"
+)
+df_vapfd_trim_thrombo <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(4.816794, 4.422863, 5.042505, 8.747834, 6.493937, 4.143719, 4.058248, 4.436482, 4.306867),
+  CI_Lower = c(3.929464, 3.252720, 3.082550, 8.177010, 5.908075, 2.895261, 2.691791, 3.074323, 2.995625),
+  CI_Upper = c(5.704124, 5.593006, 7.002461, 9.318657, 7.079800, 5.392177, 5.424704, 5.798641, 5.618109),
+  Outcome = "VAPFD-28", Population = "5%-95% trimmed cohort"
+)
+df_vfd_full_thrombo <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(2.8499535, 2.8084462, 1.8660987, 6.9952168, 0.9696721, 2.1156526, 2.0279034, -1.0344144, 1.4720761),
+  CI_Lower = c(2.2886015, 1.9632965, 0.6993387, 6.6966485, 0.6680960, 1.1085714, 0.9762246, -4.2719783, 0.7445997),
+  CI_Upper = c(3.411305, 3.653596, 3.032859, 7.293785, 1.271248, 3.122734, 3.079582, 2.203149, 2.199553),
+  Outcome = "VFD-28", Population = "Full cohort"
+)
+df_vfd_trim_thrombo <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(2.896822, 2.736873, 2.570175, 5.861645, 3.954436, 2.568549, 2.544677, 2.435715, 2.357459),
+  CI_Lower = c(2.153766, 1.749729, 0.983873, 5.381202, 3.463451, 1.494902, 1.443590, 1.309505, 1.290560),
+  CI_Upper = c(3.639879, 3.724017, 4.156477, 6.342087, 4.445422, 3.642196, 3.645764, 3.561925, 3.424358),
+  Outcome = "VFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# =============================================================================
+# 2. EFFECT ESTIMATES - ULCER PROPHYLAXIS (PANEL B)
+# =============================================================================
+df_mort_full_ulcer <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-6.3269660, 3.2628634, 3.9997386, 10.0124027, 5.0909583, 3.1156188, 4.1132193, 2.8805538, 0.6170744),
+  CI_Lower = c(-8.5522414, 0.3197647, 0.7326246, 8.7777486, 3.8362678, -0.5500370, 0.3055696, -0.2177238, -2.0055733),
+  CI_Upper = c(-4.101691, 6.205962, 7.266853, 11.247057, 6.345649, 6.781275, 7.920869, 5.978831, 3.239722),
+  Outcome = "28-day mortality", Population = "Full cohort"
+)
+df_mort_trim_ulcer <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-2.841608, 3.070863, 3.898926, 13.396338, 11.209902, 3.026214, 4.177859, 3.643514, 2.759617),
+  CI_Lower = c(-5.2793619, 0.1525676, 0.7499104, 12.0510757, 9.8758717, -0.4794725, 0.8045618, 0.4991280, -0.1419564),
+  CI_Upper = c(-0.4038533, 5.9891592, 7.0479418, 14.7416007, 12.5439329, 6.5319011, 7.5511554, 6.7879003, 5.6611912),
+  Outcome = "28-day mortality", Population = "5%-95% trimmed cohort"
+)
+df_vapfd_full_ulcer <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(1.4680219, -1.1879947, -1.3363023, -4.5523794, -2.8865769, -1.0918840, -1.3643026, -1.0712836, -0.4259186),
+  CI_Lower = c(0.8600648, -1.9982737, -2.2393948, -4.8925242, -3.2245129, -2.0232966, -2.3290048, -1.9264967, -1.1509548),
+  CI_Upper = c(2.0759789, -0.3777157, -0.4332099, -4.2122345, -2.5486409, -0.1604714, -0.3996004, -0.2160704, 0.2991176),
+  Outcome = "VAPFD-28", Population = "Full cohort"
+)
+df_vapfd_trim_ulcer <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(0.5422902, -1.1352746, -1.2962585, -4.6414156, -4.1463893, -1.0906726, -1.4151372, -1.2749321, -0.9585353),
+  CI_Lower = c(-0.1242986, -1.9398490, -2.1666666, -5.0140840, -4.5161809, -2.0187427, -2.3680994, -2.1426694, -1.7580991),
+  CI_Upper = c(1.2088790, -0.3307002, -0.4258503, -4.2687473, -3.7765976, -0.1626026, -0.4621750, -0.4071947, -0.1589715),
+  Outcome = "VAPFD-28", Population = "5%-95% trimmed cohort"
+)
+df_vfd_full_ulcer <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(0.4237279, -1.7924467, -2.0045717, -5.7674964, -4.7150669, -1.6189371, -1.7862274, -1.7508969, -1.0780267),
+  CI_Lower = c(-0.08567695, -2.47907319, -2.80549604, -6.06630192, -5.00887036, -2.41688314, -2.60929917, -2.50671297, -1.71814886),
+  CI_Upper = c(0.9331328, -1.1058202, -1.2036474, -5.46869092, -4.4212633, -0.8209911, -0.9631555, -0.9950809, -0.4379046),
+  Outcome = "VFD-28", Population = "Full cohort"
+)
+df_vfd_trim_ulcer <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-0.2869672, -1.7329302, -1.8905552, -5.4549595, -4.1785661, -1.6031689, -1.7457561, -1.8188450, -1.2582354),
+  CI_Lower = c(-0.8539868, -2.4241425, -2.6458692, -5.7843103, -4.5020967, -2.3843625, -2.5604158, -2.5740240, -1.9607618),
+  CI_Upper = c(0.2800523, -1.0417180, -1.1352412, -5.1256087, -3.8550355, -0.8219753, -0.9310964, -1.0636661, -0.5557089),
+  Outcome = "VFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# =============================================================================
+# 3. DATA FORMATTING FUNCTION
+# =============================================================================
+method_order <- c(
+  "OLS, unadjusted", "OLS, adjusted", "Augmented inverse probability weighting",
+  "TMLE, random forest", "TMLE, Super Learner", "Bayesian additive regression trees",
+  "Propensity-score BART", "Generalized random forest", "Double machine learning"
+)
+
+format_causal_data <- function(df_raw) {
+  df_raw %>%
+    mutate(
+      Method = case_when(
+        grepl("OLS, unadjusted", Approach) ~ "OLS, unadjusted",
+        grepl("OLS, adjusted", Approach) ~ "OLS, adjusted",
+        grepl("AIPW", Approach) ~ "Augmented inverse probability weighting",
+        grepl("TMLE \\(Random Forest\\)", Approach) ~ "TMLE, random forest",
+        grepl("TMLE \\(Super Learner\\)", Approach) ~ "TMLE, Super Learner",
+        grepl("BART Standard", Approach) ~ "Bayesian additive regression trees",
+        grepl("ps-BART", Approach) ~ "Propensity-score BART",
+        grepl("GRF", Approach) ~ "Generalized random forest",
+        grepl("Double ML", Approach) ~ "Double machine learning",
+        TRUE ~ Approach
+      ),
+      Method = factor(Method, levels = rev(method_order)),
+      Population = factor(Population, levels = c("Full cohort", "5%-95% trimmed cohort")),
+      Outcome = factor(Outcome, levels = c("VAPFD-28", "VFD-28", "28-day mortality")),
+      estimate_label = sprintf("%.1f (%.1f to %.1f)", Estimate, CI_Lower, CI_Upper)
+    )
+}
+
+df_all_thrombo <- bind_rows(
+  df_vapfd_full_thrombo, df_vapfd_trim_thrombo,
+  df_vfd_full_thrombo, df_vfd_trim_thrombo,
+  df_mort_full_thrombo, df_mort_trim_thrombo
+) %>% format_causal_data()
+
+df_all_ulcer <- bind_rows(
+  df_vapfd_full_ulcer, df_vapfd_trim_ulcer,
+  df_vfd_full_ulcer, df_vfd_trim_ulcer,
+  df_mort_full_ulcer, df_mort_trim_ulcer
+) %>% format_causal_data()
+
+# =============================================================================
+# 4. PLOTTING FUNCTION (WITH A/B TAG SUPPORT ON LEFT PANEL)
+# =============================================================================
+make_outcome_panel <- function(data, outcome_name, x_label, show_y_axis = TRUE, panel_tag = NULL) {
+  dat <- data %>% filter(Outcome == outcome_name)
+  n_methods <- length(levels(dat$Method))
+  min_ci <- min(dat$CI_Lower, na.rm = TRUE)
+  max_ci <- max(dat$CI_Upper, na.rm = TRUE)
+  val_min <- min(0, min_ci)
+  val_max <- max(0, max_ci)
+  x_breaks_dyn <- scales::pretty_breaks(n = 5)(c(val_min, val_max))
+  x_limits_dyn <- c(min(x_breaks_dyn), max(x_breaks_dyn))
+  
+  dat <- dat %>%
+    group_by(Method) %>%
+    mutate(
+      n_estimands = n(),
+      y_base = as.numeric(Method),
+      y_dodge = case_when(
+        n_estimands == 1 ~ y_base,
+        Population == "Full cohort" ~ y_base - 0.16,
+        Population == "5%-95% trimmed cohort" ~ y_base + 0.16
+      )
+    ) %>%
+    ungroup()
+    
+  ymin_vals <- seq(0.5, n_methods, by = 2)
+  background <- data.frame(ymin = ymin_vals, ymax = ymin_vals + 1)
+  
+  p_forest <- ggplot(dat, aes(x = Estimate, y = y_dodge, color = Population, shape = Population)) +
+    geom_rect(data = background, aes(ymin = ymin, ymax = ymax, xmin = -Inf, xmax = Inf), inherit.aes = FALSE, fill = "#F7F7F7") +
+    geom_vline(xintercept = 0, linewidth = 0.45, color = "#555555") +
+    geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.15, linewidth = 0.65) +
+    geom_point(size = 2.5) +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_shape_manual(values = c("Full cohort" = 15, "5%-95% trimmed cohort" = 16)) +
+    scale_x_continuous(limits = x_limits_dyn, breaks = x_breaks_dyn, expand = c(0, 0)) +
+    scale_y_continuous(breaks = 1:n_methods, labels = levels(dat$Method), limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    labs(x = x_label, y = NULL, tag = panel_tag) +
+    theme_classic(base_size = 10) +
+    theme(
+      text = element_text(family = "sans", color = "black", face = "plain"),
+      axis.text.y = if(show_y_axis) element_text(size = 9.0, color = "black") else element_blank(),
+      axis.text.x = element_text(size = 8.5, color = "black"),
+      axis.title.x = element_text(size = 9.5, margin = margin(t = 8)),
+      axis.line.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.x = element_line(linewidth = 0.4, color = "black"),
+      axis.ticks.x = element_line(linewidth = 0.4, color = "black"),
+      legend.position = "none",
+      plot.tag = element_text(size = 14, color = "black", margin = margin(b = 6, r = 6)),
+      plot.tag.position = "topleft",
+      plot.margin = margin(t = 2, r = 3, b = 2, l = 3)
+    )
+
+  p_text <- ggplot(dat, aes(x = 0, y = y_dodge, color = Population)) +
+    geom_text(aes(label = estimate_label), hjust = 0, size = 2.75, show.legend = FALSE) +
+    annotate("text", x = 0, y = n_methods + 1.0, label = "Estimate (95% CI)", hjust = 0, fontface = "plain", size = 2.8, color = "black") +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    theme_void() +
+    theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 0))
+
+  p_main <- p_forest + p_text + plot_layout(widths = c(5.4, 2.0))
+  return(p_main)
+}
+
+# =============================================================================
+# 5. FINAL ASSEMBLY: THROMBOPROPHYLAXIS (A) / ULCER PROPHYLAXIS (B)
+# =============================================================================
+
+# Top row: Thromboprophylaxis (no legend)
+panel_vapfd_thrombo <- make_outcome_panel(df_all_thrombo, "VAPFD-28", "Difference in VAPFD-28, days", TRUE, panel_tag = "A)")
+panel_vfd_thrombo   <- make_outcome_panel(df_all_thrombo, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mort_thrombo  <- make_outcome_panel(df_all_thrombo, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+row_thrombo <- (panel_vapfd_thrombo | panel_vfd_thrombo | panel_mort_thrombo) &
+  theme(legend.position = "none")
+
+# Bottom row: Ulcer prophylaxis (with single shared legend at the bottom)
+panel_vapfd_ulcer <- make_outcome_panel(df_all_ulcer, "VAPFD-28", "Difference in VAPFD-28, days", TRUE, panel_tag = "B)")
+panel_vfd_ulcer   <- make_outcome_panel(df_all_ulcer, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mort_ulcer  <- make_outcome_panel(df_all_ulcer, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+row_ulcer <- (panel_vapfd_ulcer | panel_vfd_ulcer | panel_mort_ulcer) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# Vertical combination (without reapplying a global theme that would reactivate the top legend)
+figure_combined <- row_thrombo / row_ulcer
+
+# High-resolution TIFF export
+ggsave(
+  filename = "Figure_Main_Causal_Effects_Thrombo_Ulcer.tiff",
+  plot = figure_combined,
+  device = "tiff",
+  width = 16.5,
+  height = 10.8,
+  units = "in",
+  dpi = 600,
+  compression = "lzw",
+  bg = "white"
+)
+```
+
+
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# =============================================================================
+# 1. ATT/ATO ESTIMATES
+# =============================================================================
+# A. Mortality (ATT/ATO) - Multiplied by 100 for percentage scale
+df_mort_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "TMLE (ATT)", "Double ML (ATT)", "AIPW (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(5.3, 3.9, 2.0, 3.0, 102.3, 4.1, 4.3),
+  CI_Lower = c(1.4, 1.2, 0.7, -0.5, 90.1, 0.4, 0.5),
+  CI_Upper = c(9.2, 6.6, 3.3, 6.6, 114.4, 7.7, 8.2),
+  Outcome = "28-day mortality"
+)
+
+# B. VAPFD-28
+df_vapfd_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "TMLE (ATT)", "Double ML (ATT)", "AIPW (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(-16.59, -12.34, -6.59, -9.61, -22.47, -12.79, -14.11),
+  CI_Lower = c(-27.40, -19.88, -10.20, -19.37, -41.90, -22.99, -24.36),
+  CI_Upper = c(-5.77, -4.80, -2.98, 0.014, -0.304, -0.260, -0.387),
+  Outcome = "VAPFD-28"
+)
+
+# C. VFD-28
+df_vfd_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "TMLE (ATT)", "Double ML (ATT)", "AIPW (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(-21.32, -18.26, -10.16, -16.08, -26.26, -17.60, -18.57),
+  CI_Lower = c(-30.73, -25.01, -13.29, -24.73, -43.81, -25.99, -27.18),
+  CI_Upper = c(-1.191, -1.151, -7.04, -0.743, -0.870, -0.921, -0.996),
+  Outcome = "VFD-28"
+)
+df_all_supp_raw <- bind_rows(df_vapfd_att, df_vfd_att, df_mort_att)
+
+# =============================================================================
+# 2. ARTIFACT CLEANING
+# =============================================================================
+df_all_supp <- df_all_supp_raw %>%
+  mutate(
+    Estimand = if_else(grepl("ATO", Approach), "ATO", "ATT"),
+    Method_Raw = gsub(" \\(ATT\\)| \\(ATO\\)", "", Approach),
+    Method = case_when(
+      Method_Raw == "AIPW" ~ "Augmented inverse probability weighting",
+      Method_Raw == "TMLE" ~ "TMLE, random forest",
+      Method_Raw == "BART Standard" ~ "Bayesian additive regression trees",
+      Method_Raw == "ps-BART" ~ "Propensity-score BART",
+      Method_Raw == "GRF" ~ "Generalized random forest",
+      Method_Raw == "Double ML" ~ "Double machine learning",
+      TRUE ~ Method_Raw
+    )
+  ) %>%
+  filter(
+    !(Outcome == "28-day mortality" & (Estimate > 50 | Estimate < -50 | CI_Upper > 50 | CI_Lower < -50)),
+    !(Outcome %in% c("VAPFD-28", "VFD-28") & (Estimate > 50 | Estimate < -50))
+  )
+
+# =============================================================================
+# 3. FORMATTING
+# =============================================================================
+method_order_supp <- c(
+  "Augmented inverse probability weighting", "TMLE, random forest",
+  "Bayesian additive regression trees", "Propensity-score BART",
+  "Generalized random forest", "Double machine learning"
+)
+df_all_supp <- df_all_supp %>%
+  mutate(
+    Method = factor(Method, levels = rev(method_order_supp)),
+    Estimand = factor(Estimand, levels = c("ATT", "ATO")),
+    Outcome = factor(Outcome, levels = c("VAPFD-28", "VFD-28", "28-day mortality")),
+    estimate_label = sprintf("%.1f (%.1f to %.1f)", Estimate, CI_Lower, CI_Upper)
+  )
+
+# =============================================================================
+# 4. PLOTTING FUNCTION
+# =============================================================================
+make_supp_panel <- function(data, outcome_name, x_label, show_y_axis = TRUE) {
+  dat <- data %>% filter(Outcome == outcome_name)
+  n_methods <- length(levels(dat$Method))
+  min_ci <- min(dat$CI_Lower, na.rm = TRUE)
+  max_ci <- max(dat$CI_Upper, na.rm = TRUE)
+  val_min <- min(0, min_ci)
+  val_max <- max(0, max_ci)
+  x_breaks_dyn <- scales::pretty_breaks(n = 5)(c(val_min, val_max))
+  x_limits_dyn <- c(min(x_breaks_dyn), max(x_breaks_dyn))
+  
+  dat <- dat %>%
+    group_by(Method) %>%
+    mutate(
+      n_estimands = n(),
+      y_base = as.numeric(Method),
+      y_dodge = case_when(
+        n_estimands == 1 ~ y_base,
+        Estimand == "ATO" ~ y_base - 0.16,
+        Estimand == "ATT" ~ y_base + 0.16
+      )
+    ) %>%
+    ungroup()
+    
+  ymin_vals <- seq(0.5, n_methods, by = 2)
+  background <- data.frame(ymin = ymin_vals, ymax = ymin_vals + 1)
+  
+  p_forest <- ggplot(dat, aes(x = Estimate, y = y_dodge, color = Estimand, shape = Estimand)) +
+    geom_rect(data = background, aes(ymin = ymin, ymax = ymax, xmin = -Inf, xmax = Inf), inherit.aes = FALSE, fill = "#F7F7F7") +
+    geom_vline(xintercept = 0, linewidth = 0.45, color = "#555555") +
+    geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.15, linewidth = 0.65) +
+    geom_point(size = 2.5) +
+    scale_color_manual(values = c("ATT" = "#C0392B", "ATO" = "#2980B9")) +
+    scale_shape_manual(values = c("ATT" = 15, "ATO" = 16)) +
+    scale_x_continuous(limits = x_limits_dyn, breaks = x_breaks_dyn, expand = c(0, 0)) +
+    scale_y_continuous(breaks = 1:n_methods, labels = levels(dat$Method), limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    labs(x = x_label, y = NULL) +
+    theme_classic(base_size = 10) +
+    theme(
+      text = element_text(family = "sans", color = "black", face = "plain"),
+      axis.text.y = if(show_y_axis) element_text(size = 9.0, color = "black") else element_blank(),
+      axis.text.x = element_text(size = 8.5, color = "black"),
+      axis.title.x = element_text(size = 9.5, margin = margin(t = 8)),
+      axis.line.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.x = element_line(linewidth = 0.4, color = "black"),
+      axis.ticks.x = element_line(linewidth = 0.4, color = "black"),
+      legend.position = "none",
+      plot.margin = margin(t = 2, r = 3, b = 2, l = 3)
+    )
+
+  p_text <- ggplot(dat, aes(x = 0, y = y_dodge, color = Estimand)) +
+    geom_text(aes(label = estimate_label), hjust = 0, size = 2.75, show.legend = FALSE) +
+    annotate("text", x = 0, y = n_methods + 1.0, label = "Estimate (95% CI)", hjust = 0, fontface = "plain", size = 2.8, color = "black") +
+    scale_color_manual(values = c("ATT" = "#C0392B", "ATO" = "#2980B9")) +
+    scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    theme_void() +
+    theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 0))
+
+  p_main <- p_forest + p_text + plot_layout(widths = c(5.4, 2.0))
+  return(p_main)
+}
+
+# =============================================================================
+# 5. FINAL ASSEMBLY
+# =============================================================================
+panel_vapfd_supp <- make_supp_panel(df_all_supp, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd_supp <- make_supp_panel(df_all_supp, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mort_supp <- make_supp_panel(df_all_supp, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_supp <- (panel_vapfd_supp | panel_vfd_supp | panel_mort_supp) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank()) +
+  labs(
+    caption = "Note: To preserve graphical scale and readability, estimators producing extreme values due to positivity violations (specifically AIPW and TMLE for the ATT) were excluded from the visualization. Raw estimates and confidence intervals are provided in Supplementary Table [X]."
+  )
+
+# Save plot
+ggsave(
+  filename = "Figure_Supplementary_ATT_ATO_Ulcer.tiff",
+  plot = figure_supp, width = 16.5, height = 5.0, units = "in", dpi = 600, compression = "lzw"
+)
+```
+
+##########################################################
+######## ORAL ##############
+#######################################################
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# =============================================================================
+# 1. EFFECT ESTIMATES - ORAL CARE
+# =============================================================================
+# A. Mortality (Full and Trimmed) - Multiplied by 100 for percentage scale
+df_mort_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-11.206721, 1.335846, 3.785412, 4.658358, 3.367163, 1.163989, 3.406063, 2.239058, -1.278671),
+  CI_Lower = c(-13.527496, -2.132308, -1.337148, 3.382506, 2.094173, -3.229512, -0.832493, -6.896509, -4.189410),
+  CI_Upper = c(-8.885942, 4.804001, 8.907972, 5.934209, 4.640153, 5.557491, 7.644620, 11.374624, 1.632068),
+  Outcome = "28-day mortality", Population = "Full cohort"
+)
+df_mort_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-6.010636, 0.600532, 7.757282, 8.576344, 7.005686, 1.781851, 4.625493, 4.030315, 1.336544),
+  CI_Lower = c(-9.075310, -3.450672, 1.363689, 6.868408, 5.247990, -2.838801, -0.390629, -0.015121, -2.728684),
+  CI_Upper = c(-2.945962, 4.651735, 14.150876, 10.284280, 8.763381, 6.402502, 9.641615, 8.075752, 5.401773),
+  Outcome = "28-day mortality", Population = "5%-95% trimmed cohort"
+)
+
+# B. VAPFD-28 (Full and Trimmed)
+df_vapfd_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(2.80095258, -0.27193342, -0.99897814, -1.37505568, -0.85819656, -0.07777896, -0.63552029, -0.97951770, 0.39152605),
+  CI_Lower = c(2.1666267, -1.2267681, -2.4168965, -1.7281478, -1.2083615, -1.1313972, -1.7868211, -3.5474079, -0.4053801),
+  CI_Upper = c(3.4352784, 0.6829013, 0.4189402, -1.0219636, -0.5080316, 0.9758392, 0.5157805, 1.5883725, 1.1884322),
+  Outcome = "VAPFD-28", Population = "Full cohort"
+)
+df_vapfd_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(1.57753959, -0.05169443, -1.89364581, -2.24539929, -1.81125632, -0.13960678, -0.64504003, -0.96886949, -0.35730822),
+  CI_Lower = c(0.7410509, -1.1646176, -3.6812720, -2.7161602, -2.2951024, -1.2419080, -1.9312644, -2.1001451, -1.4709527),
+  CI_Upper = c(2.4140283, 1.0612288, -0.1060196, -1.7746384, -1.3274103, 0.9626945, 0.6411843, 0.1624061, 0.7563363),
+  Outcome = "VAPFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# C. VFD-28 (Full and Trimmed)
+df_vfd_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(1.78416081, 0.24840599, 0.18360009, -1.12267340, -1.01290135, 0.21792671, -0.08743467, 0.01739390, 0.43718699),
+  CI_Lower = c(1.2521991, -0.5607163, -1.0452179, -1.4088347, -1.3034347, -0.6116424, -0.8785119, -2.0913059, -0.3058386),
+  CI_Upper = c(2.3161225, 1.0575282, 1.4124180, -0.8365121, -0.7223680, 1.0474958, 0.7036426, 2.1260937, 1.1802126),
+  Outcome = "VFD-28", Population = "Full cohort"
+)
+df_vfd_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(1.229495935, 0.268502763, -0.315623002, -1.233192719, -0.669893735, 0.127862057, -0.200738709, -0.004957588, 0.221171072),
+  CI_Lower = c(0.5348183, -0.6705025, -1.8968601, -1.6298904, -1.0807823, -0.7623488, -1.1463877, -1.0483835, -0.7836409),
+  CI_Upper = c(1.9241736, 1.2075080, 1.2656141, -0.8364951, -0.2590051, 1.0180729, 0.7449103, 1.0384683, 1.2259830),
+  Outcome = "VFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# =============================================================================
+# 2. DATA AGGREGATION AND FORMATTING
+# =============================================================================
+df_all <- bind_rows(df_vapfd_full, df_vapfd_trim, df_vfd_full, df_vfd_trim, df_mort_full, df_mort_trim)
+
+df_all <- df_all %>%
+  mutate(
+    Method = case_when(
+      grepl("OLS, unadjusted", Approach) ~ "OLS, unadjusted",
+      grepl("OLS, adjusted", Approach) ~ "OLS, adjusted",
+      grepl("AIPW", Approach) ~ "Augmented inverse probability weighting",
+      grepl("TMLE \\(Random Forest\\)", Approach) ~ "TMLE, random forest",
+      grepl("TMLE \\(Super Learner\\)", Approach) ~ "TMLE, Super Learner",
+      grepl("BART Standard", Approach) ~ "Bayesian additive regression trees",
+      grepl("ps-BART", Approach) ~ "Propensity-score BART",
+      grepl("GRF", Approach) ~ "Generalized random forest",
+      grepl("Double ML", Approach) ~ "Double machine learning",
+      TRUE ~ Approach
+    )
+  )
+
+method_order <- c(
+  "OLS, unadjusted", "OLS, adjusted", "Augmented inverse probability weighting",
+  "TMLE, random forest", "TMLE, Super Learner", "Bayesian additive regression trees",
+  "Propensity-score BART", "Generalized random forest", "Double machine learning"
+)
+
+df_all <- df_all %>%
+  mutate(
+    Method = factor(Method, levels = rev(method_order)),
+    Population = factor(Population, levels = c("Full cohort", "5%-95% trimmed cohort")),
+    Outcome = factor(Outcome, levels = c("VAPFD-28", "VFD-28", "28-day mortality")),
+    estimate_label = sprintf("%.1f (%.1f to %.1f)", Estimate, CI_Lower, CI_Upper)
+  )
+
+# =============================================================================
+# 3. PLOTTING FUNCTION
+# =============================================================================
+make_outcome_panel <- function(data, outcome_name, x_label, show_y_axis = TRUE) {
+  dat <- data %>% filter(Outcome == outcome_name)
+  n_methods <- length(levels(dat$Method))
+  min_ci <- min(dat$CI_Lower, na.rm = TRUE)
+  max_ci <- max(dat$CI_Upper, na.rm = TRUE)
+  val_min <- min(0, min_ci)
+  val_max <- max(0, max_ci)
+  x_breaks_dyn <- scales::pretty_breaks(n = 5)(c(val_min, val_max))
+  x_limits_dyn <- c(min(x_breaks_dyn), max(x_breaks_dyn))
+  
+  dat <- dat %>%
+    group_by(Method) %>%
+    mutate(
+      n_estimands = n(),
+      y_base = as.numeric(Method),
+      y_dodge = case_when(
+        n_estimands == 1 ~ y_base,
+        Population == "Full cohort" ~ y_base - 0.16,
+        Population == "5%-95% trimmed cohort" ~ y_base + 0.16
+      )
+    ) %>%
+    ungroup()
+    
+  ymin_vals <- seq(0.5, n_methods, by = 2)
+  background <- data.frame(ymin = ymin_vals, ymax = ymin_vals + 1)
+  
+  p_forest <- ggplot(dat, aes(x = Estimate, y = y_dodge, color = Population, shape = Population)) +
+    geom_rect(data = background, aes(ymin = ymin, ymax = ymax, xmin = -Inf, xmax = Inf), inherit.aes = FALSE, fill = "#F7F7F7") +
+    geom_vline(xintercept = 0, linewidth = 0.45, color = "#555555") +
+    geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.15, linewidth = 0.65) +
+    geom_point(size = 2.5) +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_shape_manual(values = c("Full cohort" = 15, "5%-95% trimmed cohort" = 16)) +
+    scale_x_continuous(limits = x_limits_dyn, breaks = x_breaks_dyn, expand = c(0, 0)) +
+    scale_y_continuous(breaks = 1:n_methods, labels = levels(dat$Method), limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    labs(x = x_label, y = NULL) +
+    theme_classic(base_size = 10) +
+    theme(
+      text = element_text(family = "sans", color = "black", face = "plain"),
+      axis.text.y = if(show_y_axis) element_text(size = 9.0, color = "black") else element_blank(),
+      axis.text.x = element_text(size = 8.5, color = "black"),
+      axis.title.x = element_text(size = 9.5, margin = margin(t = 8)),
+      axis.line.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.x = element_line(linewidth = 0.4, color = "black"),
+      axis.ticks.x = element_line(linewidth = 0.4, color = "black"),
+      legend.position = "none",
+      plot.margin = margin(t = 2, r = 3, b = 2, l = 3)
+    )
+
+  p_text <- ggplot(dat, aes(x = 0, y = y_dodge, color = Population)) +
+    geom_text(aes(label = estimate_label), hjust = 0, size = 2.75, show.legend = FALSE) +
+    annotate("text", x = 0, y = n_methods + 1.0, label = "Estimate (95% CI)", hjust = 0, fontface = "plain", size = 2.8, color = "black") +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    theme_void() +
+    theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 0))
+
+  p_main <- p_forest + p_text + plot_layout(widths = c(5.4, 2.0))
+  return(p_main)
+}
+
+# =============================================================================
+# 4. FINAL ASSEMBLY
+# =============================================================================
+panel_vapfd <- make_outcome_panel(df_all, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd <- make_outcome_panel(df_all, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mortality <- make_outcome_panel(df_all, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_main <- (panel_vapfd | panel_vfd | panel_mortality) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+ggsave(
+  filename = "Figure_Main_Causal_Effects_Oral.tiff",
+  plot = figure_main, width = 16.5, height = 5.8, units = "in", dpi = 600, compression = "lzw"
+)
+```
+
+```{r}
+library(patchwork)
+library(ggplot2)
+
+# =============================================================================
+# 1. UPPER ROW: MAIN CAUSAL EFFECTS - ATE (PANEL A)
+# =============================================================================
+panel_vapfd <- make_outcome_panel(df_all, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd <- make_outcome_panel(df_all, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mortality <- make_outcome_panel(df_all, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_main <- (panel_vapfd | panel_vfd | panel_mortality) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# =============================================================================
+# 2. LOWER ROW: SUPPLEMENTARY EFFECTS - ATT / ATO (PANEL B)
+# =============================================================================
+panel_vapfd_supp <- make_supp_panel(df_all_supp, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd_supp <- make_supp_panel(df_all_supp, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mort_supp <- make_supp_panel(df_all_supp, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_supp <- (panel_vapfd_supp | panel_vfd_supp | panel_mort_supp) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# =============================================================================
+# 3. OVERALL VERTICAL ASSEMBLY AND TIFF EXPORT
+# =============================================================================
+# Encapsulation with wrap_elements preserves the distinct legend for each row
+figure_combined_oral <- (
+  wrap_elements(full = figure_main) / 
+  wrap_elements(full = figure_supp)
+) +
+  plot_annotation(
+    tag_levels = "A",
+    caption = "Extreme estimates from TMLE and AIPW (e.g., AIPW ATT for mortality = 104%) are considered artifacts of positivity violations and are excluded from the graphical display to maintain scale.",
+    theme = theme(
+      plot.caption = element_text(hjust = 0, size = 10, color = "black", margin = margin(t = 10))
+    )
+  ) &
+  theme(
+    plot.tag = element_text(size = 14, color = "black")
+  )
+
+# High-resolution save (height adjusted to 10.8 inches for the 2 rows)
+ggsave(
+  filename = "Figure_Combined_Main_and_Supp_oral.tiff",
+  plot = figure_combined_oral, 
+  device = "tiff",
+  width = 16.5, 
+  height = 10.8, 
+  units = "in", 
+  dpi = 600, 
+  compression = "lzw",
+  bg = "white"
+)
+
+```
+
+
+
+################################
+####  BED ############
+##############################
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# =============================================================================
+# 1. EFFECT ESTIMATES - BED ELEVATION
+# =============================================================================
+# A. Mortality (Full and Trimmed) - Multiplied by 100 for percentage scale
+df_mort_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(3.767542, -3.055724, -2.365163, -45.214225, -36.275324, -4.534013, -4.325699, 1.778355, -2.531864),
+  CI_Lower = c(-0.708156, -7.464493, -7.592274, -46.483792, -37.531757, -9.915804, -9.776960, -9.075883, -5.418054),
+  CI_Upper = c(8.243240, 1.353045, 2.861948, -43.944659, -35.018892, 0.847779, 1.125562, 12.632592, 0.354326),
+  Outcome = "28-day mortality", Population = "Full cohort"
+)
+
+df_mort_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(0.349110, -3.965791, -4.853415, -27.519121, -16.904179, -2.572674, -2.653585, -3.430776, -5.520576),
+  CI_Lower = c(-4.672247, -9.061331, -14.860457, -29.686088, -19.058524, -8.093950, -8.273752, -9.073569, -10.305823),
+  CI_Upper = c(5.370466, 1.129750, 5.153627, -25.352153, -14.749834, 2.948603, 2.966582, 2.212016, -0.735329),
+  Outcome = "28-day mortality", Population = "5%-95% trimmed cohort"
+)
+
+# B. VAPFD-28 (Full and Trimmed)
+df_vapfd_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(-0.5721653, 0.9532587, 0.7377181, 12.4991609, 9.8130780, 0.9135006, 0.8717179, -0.4740460, 0.8234635),
+  CI_Lower = c(-1.7943374, -0.2604685, -0.7157465, 12.1530328, 9.4702263, -0.42924997, -0.46714598, -3.63464526, 0.03027231),
+  CI_Upper = c(0.6500068, 2.1669858, 2.1911826, 12.8452891, 10.1559296, 2.2562511, 2.2105818, 2.6865533, 1.6166547),
+  Outcome = "VAPFD-28", Population = "Full cohort"
+)
+
+df_vapfd_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(0.09166467, 1.06107495, 1.50514362, 7.22864265, 4.97638890, 0.59612369, 0.61435934, 1.06867291, 1.54113350),
+  CI_Lower = c(-1.2805071, -0.3428803, -1.1801980, 6.6405844, 4.3819839, -0.8127595, -0.8204740, -0.4627215, 0.2345897),
+  CI_Upper = c(1.463836, 2.465030, 4.190485, 7.816701, 5.570794, 2.005007, 2.049193, 2.600067, 2.847677),
+  Outcome = "VAPFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# C. VFD-28 (Full and Trimmed)
+df_vfd_full <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(0.2961394, 1.4780439, 1.2210833, 9.6070907, 8.0201757, 1.3591220, 1.3289136, -0.5107719, 0.6192786),
+  CI_Lower = c(-0.726455605, 0.449961556, 0.003283968, 9.324112598, 7.733422102, 0.266412022, 0.219940825, -3.345352397, -0.070201606),
+  CI_Upper = c(1.318734, 2.506126, 2.438883, 9.890069, 8.306929, 2.451832, 2.437886, 2.323809, 1.308759),
+  Outcome = "VFD-28", Population = "Full cohort"
+)
+
+df_vfd_trim <- data.frame(
+  Approach = c("OLS, unadjusted", "OLS, adjusted", "AIPW", "TMLE (Random Forest)", "TMLE (Super Learner)", "BART Standard (bartCause)", "ps-BART (Official Pkg)", "GRF", "Double ML (IRM)"),
+  Estimate = c(0.8831881, 1.5456421, 2.4748312, 7.1834850, 4.7317871, 1.1727974, 1.1543490, 1.6042392, 1.5899610),
+  CI_Lower = c(-0.3354792, 0.2866262, 0.1854379, 6.6574506, 4.1971247, -0.2070155, -0.2413221, 0.2269469, 0.3868972),
+  CI_Upper = c(2.101855, 2.804658, 4.764225, 7.709519, 5.266450, 2.552610, 2.550020, 2.981532, 2.793025),
+  Outcome = "VFD-28", Population = "5%-95% trimmed cohort"
+)
+
+# =============================================================================
+# 2. DATA AGGREGATION AND FORMATTING
+# =============================================================================
+df_all <- bind_rows(df_vapfd_full, df_vapfd_trim, df_vfd_full, df_vfd_trim, df_mort_full, df_mort_trim)
+
+df_all <- df_all %>%
+  mutate(
+    Method = case_when(
+      grepl("OLS, unadjusted", Approach) ~ "OLS, unadjusted",
+      grepl("OLS, adjusted", Approach) ~ "OLS, adjusted",
+      grepl("AIPW", Approach) ~ "Augmented inverse probability weighting",
+      grepl("TMLE \\(Random Forest\\)", Approach) ~ "TMLE, random forest",
+      grepl("TMLE \\(Super Learner\\)", Approach) ~ "TMLE, Super Learner",
+      grepl("BART Standard", Approach) ~ "Bayesian additive regression trees",
+      grepl("ps-BART", Approach) ~ "Propensity-score BART",
+      grepl("GRF", Approach) ~ "Generalized random forest",
+      grepl("Double ML", Approach) ~ "Double machine learning",
+      TRUE ~ Approach
+    )
+  )
+
+method_order <- c(
+  "OLS, unadjusted", "OLS, adjusted", "Augmented inverse probability weighting",
+  "TMLE, random forest", "TMLE, Super Learner", "Bayesian additive regression trees",
+  "Propensity-score BART", "Generalized random forest", "Double machine learning"
+)
+
+df_all <- df_all %>%
+  mutate(
+    Method = factor(Method, levels = rev(method_order)),
+    Population = factor(Population, levels = c("Full cohort", "5%-95% trimmed cohort")),
+    Outcome = factor(Outcome, levels = c("VAPFD-28", "VFD-28", "28-day mortality")),
+    estimate_label = sprintf("%.1f (%.1f to %.1f)", Estimate, CI_Lower, CI_Upper)
+  )
+
+# =============================================================================
+# 3. PLOTTING FUNCTION
+# =============================================================================
+make_outcome_panel <- function(data, outcome_name, x_label, show_y_axis = TRUE) {
+  dat <- data %>% filter(Outcome == outcome_name)
+  n_methods <- length(levels(dat$Method))
+  min_ci <- min(dat$CI_Lower, na.rm = TRUE)
+  max_ci <- max(dat$CI_Upper, na.rm = TRUE)
+  val_min <- min(0, min_ci)
+  val_max <- max(0, max_ci)
+  x_breaks_dyn <- scales::pretty_breaks(n = 5)(c(val_min, val_max))
+  x_limits_dyn <- c(min(x_breaks_dyn), max(x_breaks_dyn))
+  
+  dat <- dat %>%
+    group_by(Method) %>%
+    mutate(
+      n_estimands = n(),
+      y_base = as.numeric(Method),
+      y_dodge = case_when(
+        n_estimands == 1 ~ y_base,
+        Population == "Full cohort" ~ y_base - 0.16,
+        Population == "5%-95% trimmed cohort" ~ y_base + 0.16
+      )
+    ) %>%
+    ungroup()
+    
+  ymin_vals <- seq(0.5, n_methods, by = 2)
+  background <- data.frame(ymin = ymin_vals, ymax = ymin_vals + 1)
+  
+  p_forest <- ggplot(dat, aes(x = Estimate, y = y_dodge, color = Population, shape = Population)) +
+    geom_rect(data = background, aes(ymin = ymin, ymax = ymax, xmin = -Inf, xmax = Inf), inherit.aes = FALSE, fill = "#F7F7F7") +
+    geom_vline(xintercept = 0, linewidth = 0.45, color = "#555555") +
+    geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.15, linewidth = 0.65) +
+    geom_point(size = 2.5) +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_shape_manual(values = c("Full cohort" = 15, "5%-95% trimmed cohort" = 16)) +
+    scale_x_continuous(limits = x_limits_dyn, breaks = x_breaks_dyn, expand = c(0, 0)) +
+    scale_y_continuous(breaks = 1:n_methods, labels = levels(dat$Method), limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    labs(x = x_label, y = NULL) +
+    theme_classic(base_size = 10) +
+    theme(
+      text = element_text(family = "sans", color = "black", face = "plain"),
+      axis.text.y = if(show_y_axis) element_text(size = 9.0, color = "black") else element_blank(),
+      axis.text.x = element_text(size = 8.5, color = "black"),
+      axis.title.x = element_text(size = 9.5, margin = margin(t = 8)),
+      axis.line.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.x = element_line(linewidth = 0.4, color = "black"),
+      axis.ticks.x = element_line(linewidth = 0.4, color = "black"),
+      legend.position = "none",
+      plot.margin = margin(t = 2, r = 3, b = 2, l = 3)
+    )
+
+  p_text <- ggplot(dat, aes(x = 0, y = y_dodge, color = Population)) +
+    geom_text(aes(label = estimate_label), hjust = 0, size = 2.75, show.legend = FALSE) +
+    annotate("text", x = 0, y = n_methods + 1.0, label = "Estimate (95% CI)", hjust = 0, fontface = "plain", size = 2.8, color = "black") +
+    scale_color_manual(values = c("Full cohort" = "#C0392B", "5%-95% trimmed cohort" = "#2980B9")) +
+    scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    theme_void() +
+    theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 0))
+
+  p_main <- p_forest + p_text + plot_layout(widths = c(5.4, 2.0))
+  return(p_main)
+}
+
+# =============================================================================
+# 4. FINAL ASSEMBLY
+# =============================================================================
+panel_vapfd <- make_outcome_panel(df_all, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd <- make_outcome_panel(df_all, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mortality <- make_outcome_panel(df_all, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_main <- (panel_vapfd | panel_vfd | panel_mortality) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# ggsave(filename = "Figure_Main_Causal_Effects_Bed.tiff", plot = figure_main, width = 16.5, height = 5.8, units = "in", dpi = 600, compression = "lzw")
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# =============================================================================
+# 1. ATT/ATO ESTIMATES - BED ELEVATION
+# =============================================================================
+
+# A. Mortality (ATT/ATO) - Multiplied by 100 for percentage scale
+# Note: AIPW (ATT) = 102.3%, will be excluded by the automatic filter (>50)
+df_mort_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "TMLE (ATT)", "Double ML (ATT)", "AIPW (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(1.4, -4.6, -1.8, -2.2, 102.3, -4.4, -4.1),
+  CI_Lower = c(-8.9, -9.0, -2.8, -5.0, 90.1, -9.8, -9.6),
+  CI_Upper = c(11.7, -0.2, -0.7, 0.6, 114.4, 1.0, 1.5),
+  Outcome = "28-day mortality"
+)
+
+# B. VAPFD-28 (in days - AIPW manually removed due to extremely wide CI)
+df_vapfd_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "TMLE (ATT)", "Double ML (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(-0.453, 1.360, 0.548, 0.741, 0.862, 0.857),
+  CI_Lower = c(-3.508, 0.152, 0.257, -0.029, -0.476, -0.510),
+  CI_Upper = c(2.603, 2.569, 0.838, 1.512, 2.201, 2.225),
+  Outcome = "VAPFD-28"
+)
+
+# C. VFD-28 (in days - AIPW manually removed due to extremely wide CI)
+df_vfd_att <- data.frame(
+  Approach = c("GRF (ATT)", "GRF (ATO)", "TMLE (ATT)", "Double ML (ATT)", "BART Standard (ATT)", "ps-BART (ATT)"),
+  Estimate = c(-0.312, 1.650, 0.521, 0.584, 1.383, 1.333),
+  CI_Lower = c(-2.751, 0.579, 0.274, -0.091, 0.321, 0.224),
+  CI_Upper = c(2.127, 2.721, 0.768, 1.260, 2.445, 2.441),
+  Outcome = "VFD-28"
+)
+
+df_all_supp_raw <- bind_rows(df_vapfd_att, df_vfd_att, df_mort_att)
+
+# =============================================================================
+# 2. ARTIFACT CLEANING
+# =============================================================================
+df_all_supp <- df_all_supp_raw %>%
+  mutate(
+    Estimand = if_else(grepl("ATO", Approach), "ATO", "ATT"),
+    Method_Raw = gsub(" \\(ATT\\)| \\(ATO\\)", "", Approach),
+    Method = case_when(
+      Method_Raw == "TMLE" ~ "TMLE, random forest",
+      Method_Raw == "BART Standard" ~ "Bayesian additive regression trees",
+      Method_Raw == "ps-BART" ~ "Propensity-score BART",
+      Method_Raw == "GRF" ~ "Generalized random forest",
+      Method_Raw == "Double ML" ~ "Double machine learning",
+      TRUE ~ Method_Raw
+    )
+  ) %>%
+  filter(
+    !(Outcome == "28-day mortality" & (Estimate > 50 | Estimate < -50 | CI_Upper > 50 | CI_Lower < -50)),
+    !(Outcome %in% c("VAPFD-28", "VFD-28") & (Estimate > 50 | Estimate < -50 | CI_Upper > 50 | CI_Lower < -50))
+  )
+
+# =============================================================================
+# 3. FORMATTING
+# =============================================================================
+method_order_supp <- c(
+  "TMLE, random forest",
+  "Bayesian additive regression trees", "Propensity-score BART",
+  "Generalized random forest", "Double machine learning"
+)
+df_all_supp <- df_all_supp %>%
+  mutate(
+    Method = factor(Method, levels = rev(method_order_supp)),
+    Estimand = factor(Estimand, levels = c("ATT", "ATO")),
+    Outcome = factor(Outcome, levels = c("VAPFD-28", "VFD-28", "28-day mortality")),
+    estimate_label = sprintf("%.1f (%.1f to %.1f)", Estimate, CI_Lower, CI_Upper)
+  )
+
+# =============================================================================
+# 4. PLOTTING FUNCTION
+# =============================================================================
+make_supp_panel <- function(data, outcome_name, x_label, show_y_axis = TRUE) {
+  dat <- data %>% filter(Outcome == outcome_name)
+  n_methods <- length(levels(dat$Method))
+  min_ci <- min(dat$CI_Lower, na.rm = TRUE)
+  max_ci <- max(dat$CI_Upper, na.rm = TRUE)
+  val_min <- min(0, min_ci)
+  val_max <- max(0, max_ci)
+  x_breaks_dyn <- scales::pretty_breaks(n = 5)(c(val_min, val_max))
+  x_limits_dyn <- c(min(x_breaks_dyn), max(x_breaks_dyn))
+  
+  dat <- dat %>%
+    group_by(Method) %>%
+    mutate(
+      n_estimands = n(),
+      y_base = as.numeric(Method),
+      y_dodge = case_when(
+        n_estimands == 1 ~ y_base,
+        Estimand == "ATO" ~ y_base - 0.16,
+        Estimand == "ATT" ~ y_base + 0.16
+      )
+    ) %>%
+    ungroup()
+    
+  ymin_vals <- seq(0.5, n_methods, by = 2)
+  background <- data.frame(ymin = ymin_vals, ymax = ymin_vals + 1)
+  
+  p_forest <- ggplot(dat, aes(x = Estimate, y = y_dodge, color = Estimand, shape = Estimand)) +
+    geom_rect(data = background, aes(ymin = ymin, ymax = ymax, xmin = -Inf, xmax = Inf), inherit.aes = FALSE, fill = "#F7F7F7") +
+    geom_vline(xintercept = 0, linewidth = 0.45, color = "#555555") +
+    geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.15, linewidth = 0.65) +
+    geom_point(size = 2.5) +
+    scale_color_manual(values = c("ATT" = "#C0392B", "ATO" = "#2980B9")) +
+    scale_shape_manual(values = c("ATT" = 15, "ATO" = 16)) +
+    scale_x_continuous(limits = x_limits_dyn, breaks = x_breaks_dyn, expand = c(0, 0)) +
+    scale_y_continuous(breaks = 1:n_methods, labels = levels(dat$Method), limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    labs(x = x_label, y = NULL) +
+    theme_classic(base_size = 10) +
+    theme(
+      text = element_text(family = "sans", color = "black", face = "plain"),
+      axis.text.y = if(show_y_axis) element_text(size = 9.0, color = "black") else element_blank(),
+      axis.text.x = element_text(size = 8.5, color = "black"),
+      axis.title.x = element_text(size = 9.5, margin = margin(t = 8)),
+      axis.line.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.line.x = element_line(linewidth = 0.4, color = "black"),
+      axis.ticks.x = element_line(linewidth = 0.4, color = "black"),
+      legend.position = "none",
+      plot.margin = margin(t = 2, r = 3, b = 2, l = 3)
+    )
+
+  p_text <- ggplot(dat, aes(x = 0, y = y_dodge, color = Estimand)) +
+    geom_text(aes(label = estimate_label), hjust = 0, size = 2.75, show.legend = FALSE) +
+    annotate("text", x = 0, y = n_methods + 1.0, label = "Estimate (95% CI)", hjust = 0, fontface = "plain", size = 2.8, color = "black") +
+    scale_color_manual(values = c("ATT" = "#C0392B", "ATO" = "#2980B9")) +
+    scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0.5, n_methods + 1.2), expand = c(0, 0)) +
+    theme_void() +
+    theme(plot.margin = margin(t = 2, r = 2, b = 2, l = 0))
+
+  p_main <- p_forest + p_text + plot_layout(widths = c(5.4, 2.0))
+  return(p_main)
+}
+
+# =============================================================================
+# 5. FINAL ASSEMBLY
+# =============================================================================
+panel_vapfd_supp <- make_supp_panel(df_all_supp, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd_supp <- make_supp_panel(df_all_supp, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mort_supp <- make_supp_panel(df_all_supp, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_supp <- (panel_vapfd_supp | panel_vfd_supp | panel_mort_supp) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank()) +
+  labs(
+    caption = "Note: AIPW estimates were excluded from the visualization due to extremely wide confidence intervals caused by positivity violations. Results are provided in Supplementary Table [X]."
+  )
+
+# Save plot
+#ggsave(filename = "Figure_Supplementary_ATT_ATO_Bed.tiff",plot = figure_supp, width = 16.5, height = 5.0, units = "in", dpi = 600, compression = "lzw")
+```
+
+```{r}
+library(patchwork)
+library(ggplot2)
+
+# =============================================================================
+# 1. UPPER ROW: MAIN CAUSAL EFFECTS - ATE (PANEL A)
+# =============================================================================
+panel_vapfd <- make_outcome_panel(df_all, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd <- make_outcome_panel(df_all, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mortality <- make_outcome_panel(df_all, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_main <- (panel_vapfd | panel_vfd | panel_mortality) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# =============================================================================
+# 2. LOWER ROW: SUPPLEMENTARY EFFECTS - ATT / ATO (PANEL B)
+# =============================================================================
+panel_vapfd_supp <- make_supp_panel(df_all_supp, "VAPFD-28", "Difference in VAPFD-28, days", TRUE)
+panel_vfd_supp <- make_supp_panel(df_all_supp, "VFD-28", "Difference in VFD-28, days", FALSE)
+panel_mort_supp <- make_supp_panel(df_all_supp, "28-day mortality", "Risk difference in 28-day mortality, %", FALSE)
+
+figure_supp <- (panel_vapfd_supp | panel_vfd_supp | panel_mort_supp) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+# =============================================================================
+# 3. OVERALL VERTICAL ASSEMBLY AND TIFF EXPORT
+# =============================================================================
+# Encapsulation with wrap_elements preserves the distinct legend for each row
+figure_combined_bed <- (
+  wrap_elements(full = figure_main) / 
+  wrap_elements(full = figure_supp)
+) +
+  plot_annotation(
+    tag_levels = "A",
+    caption = "Extreme estimates from TMLE and AIPW (e.g., AIPW ATT for mortality = 104%) are considered artifacts of positivity violations and are excluded from the graphical display to maintain scale.",
+    theme = theme(
+      plot.caption = element_text(hjust = 0, size = 10, color = "black", margin = margin(t = 10))
+    )
+  ) &
+  theme(
+    plot.tag = element_text(size = 14, color = "black")
+  )
+
+# High-resolution save (height adjusted to 10.8 inches for the 2 rows)
+ggsave(
+  filename = "Figure_Combined_Main_and_Supp_bed.tiff",
+  plot = figure_combined_bed, 
+  device = "tiff",
+  width = 16.5, 
+  height = 10.8, 
+  units = "in", 
+  dpi = 600, 
+  compression = "lzw",
+  bg = "white"
+)
+
+```
+
+
+
+
