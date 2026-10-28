@@ -1,0 +1,688 @@
+---
+title: "Anaylse_full_prep"
+author: "Yeleen FROMAGE"
+date: "2026-04-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+
+library(dplyr)
+library(readr)
+
+# 1. Load the dataset
+
+df <- readRDS("data_ml_causal_0607.rds")
+
+# 2. Set seed for reproducibility
+set.seed(12345)
+
+# 3. Calculate patient volume per center and shuffle randomly
+centers_volumetry <- df %>%
+  group_by(site_abbreviation) %>%
+  summarise(n_patients = n(), .groups = 'drop') %>%
+  sample_frac(1L) %>% 
+  mutate(cumulative_patients = cumsum(n_patients))
+
+# 4. Identify centers for the external validation cohort
+# Select centers until the cumulative sum strictly exceeds 1000 patients
+threshold_index <- which(centers_volumetry$cumulative_patients > 1000)[1]
+validation_sites <- centers_volumetry$site_abbreviation[1:threshold_index]
+
+# 5. Create the two distinct cohorts (geographical split)
+validation_set <- df %>%
+  filter(site_abbreviation %in% validation_sites)
+
+training_set <- df %>%
+  filter(!(site_abbreviation %in% validation_sites))
+
+# 6. Verification of the spatial split
+cat("\n--- SPATIAL SPLIT REPORT ---\n")
+cat("Number of centers in the training set:", length(unique(training_set$site_abbreviation)), "\n")
+cat("Number of patients in the training set:", nrow(training_set), "\n")
+cat("Number of centers in the validation set:", length(unique(validation_set$site_abbreviation)), "\n")
+cat("Number of patients in the validation set:", nrow(validation_set), "\n")
+
+# 7. Quality control: check for data leakage across sets
+leakage_check <- intersect(unique(training_set$site_abbreviation), unique(validation_set$site_abbreviation))
+
+if(length(leakage_check) == 0) {
+  cat("Spatial independence status: VALID (No overlapping centers)\n")
+} else {
+  cat("WARNING: Data leakage detected between the sets.\n")
+}
+```
+
+```{r}
+# =============================================================================
+# DESCRIPTIVE STATISTICS: SODD BUNDLE EXPOSURE (INCLUDING CENTER-LEVEL DETAILS)
+# =============================================================================
+
+# Calculation of exposure metrics by center
+sodd_center_metrics <- df %>%
+  group_by(site_abbreviation) %>%
+  summarise(
+    total_patients_in_center = n(),
+    sodd_exposed_patients = sum(SODD == 1, na.rm = TRUE),
+    center_uses_sodd = ifelse(sodd_exposed_patients > 0, 1, 0),
+    .groups = 'drop'
+  )
+
+# 1. Total volume of exposed patients
+total_sodd_patients <- sum(sodd_center_metrics$sodd_exposed_patients)
+total_cohort_patients <- nrow(df)
+
+# 2. Protocol penetration at the center level
+total_centers <- nrow(sodd_center_metrics)
+implementing_centers <- sum(sodd_center_metrics$center_uses_sodd)
+
+# 3. Global proportion of exposure within active centers
+active_centers_data <- sodd_center_metrics %>%
+  filter(center_uses_sodd == 1)
+
+proportion_in_active_centers <- sum(active_centers_data$sodd_exposed_patients) / 
+                                sum(active_centers_data$total_patients_in_center)
+
+# 4. Breakdown of proportions with and without SODD for each active center
+active_centers_details <- active_centers_data %>%
+  mutate(
+    patients_without_sodd = total_patients_in_center - sodd_exposed_patients,
+    proportion_with_sodd_pct = round((sodd_exposed_patients / total_patients_in_center) * 100, 1),
+    proportion_without_sodd_pct = round((patients_without_sodd / total_patients_in_center) * 100, 1)
+  ) %>%
+  select(
+    Center = site_abbreviation,
+    `Total Patients` = total_patients_in_center,
+    `Patients with SODD` = sodd_exposed_patients,
+    `% with SODD` = proportion_with_sodd_pct,
+    `Patients without SODD` = patients_without_sodd,
+    `% without SODD` = proportion_without_sodd_pct
+  ) %>%
+  arrange(desc(`Total Patients`))
+
+# Console output report
+cat("\n--- EPIDEMIOLOGICAL REPORT: SODD BUNDLE ---\n")
+cat(sprintf("Total patients who received SODD: %d (i.e., %.1f%% of the global cohort)\n", 
+            total_sodd_patients, 
+            (total_sodd_patients / total_cohort_patients) * 100))
+
+cat(sprintf("Centers applying SODD: %d out of %d total centers (%.1f%% of sites)\n", 
+            implementing_centers, 
+            total_centers, 
+            (implementing_centers / total_centers) * 100))
+
+cat(sprintf("Exposure rate within centers implementing the protocol: %.1f%%\n", 
+            proportion_in_active_centers * 100))
+
+cat("\n--- PRACTICE DETAILS BY ACTIVE CENTER ---\n")
+print(as.data.frame(active_centers_details), row.names = FALSE)
+```
+
+
+```{r}
+# =============================================================================
+# CLEAN-VAP — SODD ANALYSIS (Supplementary Material)
+# =============================================================================
+
+library(lme4);      library(lmerTest)
+library(tableone);  library(dplyr);    library(ggplot2)
+library(AIPW);      library(tmle);     library(SuperLearner)
+library(grf);       library(WeightIt); library(caret)
+
+dir.create("CLEAN_VAP_outputs/SODD", recursive = TRUE, showWarnings = FALSE)
+
+cat("\n=============================================================\n")
+cat("  SODD ANALYSIS — SUPPLEMENTARY MATERIAL\n")
+cat("=============================================================\n\n")
+
+# =============================================================================
+# 0. PREPARATION — Identify SODD centers
+# =============================================================================
+
+# df_full = complete cohort (train + valid combined)
+df_full <- df 
+
+# SODD rate per center
+sodd_by_centre <- df_full %>%
+  mutate(SODD_bin = as.numeric(as.character(SODD))) %>%
+  group_by(site_abbreviation) %>%
+  summarise(
+    N_total      = n(),
+    N_sodd       = sum(SODD_bin, na.rm = TRUE),
+    Pct_sodd     = mean(SODD_bin, na.rm = TRUE) * 100,
+    .groups      = "drop"
+  ) %>%
+  mutate(
+    Centre_SODD = ifelse(Pct_sodd > 0, "SODD Centre", "Non-SODD Centre")
+  )
+
+cat("─── CENTERS IMPLEMENTING SODD ───────────────────────────────\n")
+print(sodd_by_centre %>% arrange(desc(Pct_sodd)), n = Inf)
+
+# Join center information to the full dataset
+df_full <- df_full %>%
+  left_join(sodd_by_centre %>%
+              select(site_abbreviation, Centre_SODD, Pct_sodd),
+            by = "site_abbreviation")
+
+# =============================================================================
+# PART 1 — DESCRIPTION OF SODD vs NON-SODD CENTERS (Ecological Table 1)
+# =============================================================================
+cat("\n=============================================================\n")
+cat("  PART 1 — DESCRIPTION OF SODD vs NON-SODD CENTERS\n")
+cat("=============================================================\n\n")
+
+# ── 1A. Table 1 at the PATIENT level ────────────────────────────────────────────
+cat("─── TABLE 1 PATIENT LEVEL ────────────────────────────────────\n")
+
+table1_vars <- c(
+  # Demographics
+  "AGE", "SEX",
+  # Comorbidities
+  "Myocardial_infarction", "congestive_heart_failure",
+  "peripherical_vascular_disease", "COPD",
+  "connective_tissue_disease", "peptic_ulcer_disease",
+  "liver_disease", "diabetes_mellitus", "CKD",
+  "solid_tumor", "AIDS", "CCI_score",
+  "CVA_TIA_hemiplegia", "malignant_hemopathies",
+  # Severity
+  "SOFA", "APACHE_II", "ICU_admission",
+  "Duration_days_before_ICU",
+  # IS Treatments
+  "Prescription_of_ATB", "Prescription_of_IS",
+  "LT_corticosteroids",
+  # Outcomes
+  "VAPFD_28", "VFD_28", "mortality_28d", "VAP_status"
+)
+
+# Keep only existing variables
+table1_vars <- table1_vars[table1_vars %in% names(df_full)]
+
+tbl1_patient <- CreateTableOne(
+  vars       = table1_vars,
+  strata     = "Centre_SODD",
+  data       = df_full,
+  test       = TRUE,
+  addOverall = TRUE
+)
+
+print(tbl1_patient, smd = TRUE, quote = FALSE, noSpaces = TRUE)
+
+tbl1_mat <- print(tbl1_patient, smd = TRUE, printToggle = FALSE)
+write.csv(tbl1_mat,
+          "CLEAN_VAP_outputs/SODD/table1_patient_SODD_vs_nonSODD.csv")
+
+# ── 1B. Table 1 at the CENTER level (ecological unit) ──────────────────────────
+cat("\n─── TABLE 1 CENTER LEVEL (ecological) ───────────────────────\n")
+
+centre_level <- df_full %>%
+  group_by(site_abbreviation, Centre_SODD) %>%
+  summarise(
+    N_patients       = n(),
+    SODD_prevalence  = mean(as.numeric(as.character(SODD)), na.rm = TRUE),
+    Mean_AGE         = mean(AGE, na.rm = TRUE),
+    Pct_SEX_M        = mean(SEX == 1 | SEX == "M" | SEX == "Male",
+                             na.rm = TRUE) * 100,
+    Mean_SOFA        = mean(SOFA, na.rm = TRUE),
+    Mean_APACHE      = mean(APACHE_II, na.rm = TRUE),
+    Mean_VAPFD28     = mean(VAPFD_28, na.rm = TRUE),
+    Mean_VFD28       = mean(VFD_28, na.rm = TRUE),
+    Mortality_pct    = mean(
+      as.numeric(as.character(mortality_28d)), na.rm = TRUE) * 100,
+    VAP_pct = mean(as.numeric(as.character(VAP_status)), na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+cat("Summary by center group:\n")
+centre_summary <- centre_level %>%
+  group_by(Centre_SODD) %>%
+  summarise(
+    N_centres        = n(),
+    N_patients_total = sum(N_patients),
+    Median_SOFA      = median(Mean_SOFA, na.rm = TRUE),
+    Median_APACHE    = median(Mean_APACHE, na.rm = TRUE),
+    Mean_VAPFD28     = round(mean(Mean_VAPFD28, na.rm = TRUE), 2),
+    Mean_VFD28       = round(mean(Mean_VFD28, na.rm = TRUE), 2),
+    Mortality_pct    = round(mean(Mortality_pct, na.rm = TRUE), 1),
+    .groups = "drop"
+  )
+
+print(centre_summary)
+write.csv(centre_level,
+          "CLEAN_VAP_outputs/SODD/table1_centre_level_SODD.csv",
+          row.names = FALSE)
+
+# ── 1C. Plot: crude outcomes by center group ──────────────────────
+outcomes_plot_df <- df_full %>%
+  group_by(Centre_SODD) %>%
+  summarise(
+    VAPFD28_mean = mean(VAPFD_28, na.rm = TRUE),
+    VAPFD28_se   = sd(VAPFD_28, na.rm = TRUE) / sqrt(n()),
+    VFD28_mean   = mean(VFD_28, na.rm = TRUE),
+    VFD28_se     = sd(VFD_28, na.rm = TRUE) / sqrt(n()),
+    Mort_mean    = mean(as.numeric(as.character(mortality_28d)),
+                        na.rm = TRUE),
+    Mort_se      = sd(as.numeric(as.character(mortality_28d)),
+                      na.rm = TRUE) / sqrt(n()),
+    N = n(),
+    .groups = "drop"
+  )
+
+p_outcomes <- outcomes_plot_df %>%
+  tidyr::pivot_longer(cols = c(VAPFD28_mean, VFD28_mean, Mort_mean),
+                      names_to = "Outcome", values_to = "Value") %>%
+  mutate(
+    SE = case_when(
+      Outcome == "VAPFD28_mean" ~ outcomes_plot_df$VAPFD28_se[
+        match(Centre_SODD, outcomes_plot_df$Centre_SODD)],
+      Outcome == "VFD28_mean"   ~ outcomes_plot_df$VFD28_se[
+        match(Centre_SODD, outcomes_plot_df$Centre_SODD)],
+      TRUE ~ outcomes_plot_df$Mort_se[
+        match(Centre_SODD, outcomes_plot_df$Centre_SODD)]
+    ),
+    Outcome = recode(Outcome,
+                     "VAPFD28_mean" = "VAPFD-28 (days)",
+                     "VFD28_mean"   = "VFD-28 (days)",
+                     "Mort_mean"    = "28-day Mortality (%)")
+  ) %>%
+  ggplot(aes(x = Centre_SODD, y = Value, fill = Centre_SODD)) +
+  geom_col(width = 0.6, alpha = 0.85) +
+  geom_errorbar(aes(ymin = Value - 1.96 * SE,
+                    ymax = Value + 1.96 * SE),
+                width = 0.2, linewidth = 0.8) +
+  facet_wrap(~ Outcome, scales = "free_y", ncol = 3) +
+  scale_fill_manual(values = c("SODD Centre"     = "#2980B9",
+                               "Non-SODD Centre" = "#95A5A6")) +
+  labs(
+    title    = "Crude Outcomes by SODD Implementation Status",
+    subtitle = "Mean ± 95% CI | Ecological comparison (unadjusted)",
+    x        = NULL,
+    y        = "Mean Value",
+    fill     = NULL,
+    caption  = "Note: Unadjusted comparison — confounding by center case-mix not accounted for"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    plot.title      = element_text(face = "plain"), # face removed to respect guidelines
+    strip.text      = element_text(face = "plain")
+  )
+
+print(p_outcomes)
+ggsave("CLEAN_VAP_outputs/SODD/fig_outcomes_SODD_vs_nonSODD.pdf",
+       p_outcomes, width = 10, height = 5)
+
+# =============================================================================
+# PART 2 — MIXED-EFFECTS MODEL (Center-level ATE)
+# =============================================================================
+cat("\n=============================================================\n")
+cat("  PART 2 — MIXED-EFFECTS MODEL (Center-level ATE)\n")
+cat("=============================================================\n\n")
+
+# Adjustment covariates (individual level)
+covariates_adj <- intersect(
+  c("AGE", "SEX", "SOFA", "APACHE_II", "CCI_score",
+    "ICU_admission", "Duration_days_before_ICU",
+    "Prescription_of_ATB", "Prescription_of_IS",
+    "LT_corticosteroids", "Myocardial_infarction",
+    "congestive_heart_failure", "COPD", "diabetes_mellitus",
+    "CKD", "solid_tumor"),
+  names(df_full)
+)
+
+# Treatment variable at the center level
+df_full <- df_full %>%
+  mutate(
+    SODD_centre_bin = as.integer(Centre_SODD == "SODD Centre"),
+    mortality_num   = as.numeric(as.character(mortality_28d))
+  )
+
+# Base formula
+formula_fixed <- paste(
+  "~", "SODD_centre_bin", "+",
+  paste(covariates_adj, collapse = " + "),
+  "+ (1 | site_abbreviation)"
+)
+
+outcomes_lme <- list(
+  VAPFD_28    = "VAPFD_28",
+  VFD_28      = "VFD_28",
+  Mortality   = "mortality_num"
+)
+
+lme_results <- data.frame()
+
+for (out_name in names(outcomes_lme)) {
+
+  out_var <- outcomes_lme[[out_name]]
+
+  cat(sprintf("─── Mixed-effects model : %s ─────────────────────\n", out_name))
+
+  formula_lme <- as.formula(
+    paste(out_var, formula_fixed)
+  )
+
+  fit_lme <- tryCatch({
+    lmer(formula_lme, data = df_full, REML = FALSE)
+  }, error = function(e) {
+    warning("lmer failed for ", out_name, " : ", conditionMessage(e))
+    NULL
+  })
+
+  if (!is.null(fit_lme)) {
+
+    # Extraction of the SODD_centre_bin coefficient
+    coef_summary <- summary(fit_lme)$coefficients
+    est  <- coef_summary["SODD_centre_bin", "Estimate"]
+    se   <- coef_summary["SODD_centre_bin", "Std. Error"]
+    tval <- coef_summary["SODD_centre_bin", "t value"]
+    df_t <- coef_summary["SODD_centre_bin", "df"]
+    pval <- coef_summary["SODD_centre_bin", "Pr(>|t|)"]
+
+    ci_lo <- est - 1.96 * se
+    ci_hi <- est + 1.96 * se
+
+    cat(sprintf("  Estimate  : %.3f\n", est))
+    cat(sprintf("  SE        : %.3f\n", se))
+    cat(sprintf("  95%% CI    : [%.3f ; %.3f]\n", ci_lo, ci_hi))
+    cat(sprintf("  p-value   : %s\n\n", format.pval(pval, digits = 3)))
+
+    # ICC (proportion of inter-center variance)
+    var_comps  <- as.data.frame(VarCorr(fit_lme))
+    var_centre <- var_comps$vcov[var_comps$grp == "site_abbreviation"]
+    var_resid  <- var_comps$vcov[var_comps$grp == "Residual"]
+    icc        <- var_centre / (var_centre + var_resid)
+    cat(sprintf("  ICC (inter-center variance) : %.3f\n\n", icc))
+
+    lme_results <- rbind(lme_results, data.frame(
+      Outcome  = out_name,
+      Estimate = round(est,  3),
+      SE       = round(se,   3),
+      CI_Lo    = round(ci_lo, 3),
+      CI_Hi    = round(ci_hi, 3),
+      p_value  = format.pval(pval, digits = 3),
+      ICC      = round(icc, 3),
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+cat("\n─── MIXED-EFFECTS SUMMARY TABLE ─────────────────────────────\n")
+print(lme_results, row.names = FALSE)
+write.csv(lme_results,
+          "CLEAN_VAP_outputs/SODD/lme_results_SODD_ATE.csv",
+          row.names = FALSE)
+
+# Forest plot of mixed-effects results
+p_lme <- ggplot(lme_results,
+                aes(x = Estimate, y = Outcome)) +
+  geom_vline(xintercept = 0, linetype = "dashed",
+             colour = "darkred", linewidth = 0.8) +
+  geom_errorbarh(aes(xmin = CI_Lo, xmax = CI_Hi),
+                 height = 0.2, linewidth = 0.9,
+                 colour = "#2C3E50") +
+  geom_point(size = 4, shape = 21,
+             fill = "#2980B9", colour = "white") +
+  labs(
+    title    = "SODD Effect on Outcomes — Mixed-Effects Model",
+    subtitle = "Adjusted for patient-level covariates | Random intercept by center",
+    x        = "Estimated Effect (95% CI)",
+    y        = NULL,
+    caption  = "Center-level analysis | Ecological estimand"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(plot.title = element_text(face = "plain"))
+
+print(p_lme)
+ggsave("CLEAN_VAP_outputs/SODD/fig_lme_forest_SODD.pdf",
+       p_lme, width = 7, height = 4)
+
+# =============================================================================
+# PART 3 — INDIVIDUAL ATE (Implementing centers + PS trimming)
+# =============================================================================
+cat("\n=============================================================\n")
+cat("  PART 3 — INDIVIDUAL ATE (AIPW / TMLE / GRF)\n")
+cat("  Population: SODD centers only + PS trim [0.05;0.95]\n")
+cat("=============================================================\n\n")
+
+# ── Restrict to implementing centers ──────────────────────────────────────────
+df_sodd_centres <- df_full %>%
+  filter(Centre_SODD == "SODD Centre")
+
+cat(sprintf("Initial N after restricting to SODD centers: %d patients\n",
+            nrow(df_sodd_centres)))
+cat(sprintf("N centers: %d\n\n",
+            length(unique(df_sodd_centres$site_abbreviation))))
+
+# ── MATRIX CORRECTION: Cleaning of the exposure variable ───────────
+df_sodd_centres <- df_sodd_centres %>%
+  mutate(SODD_num = as.numeric(as.character(SODD))) %>%
+  filter(!is.na(SODD_num))
+
+cat("─── EXCLUSION OF MISSING DATA ───────────────────────────────\n")
+cat(sprintf("N after removing NA for treatment: %d patients\n", nrow(df_sodd_centres)))
+cat(sprintf("N treated  (SODD=1) : %d\n", sum(df_sodd_centres$SODD_num == 1)))
+cat(sprintf("N controls (SODD=0): %d\n\n", sum(df_sodd_centres$SODD_num == 0)))
+
+# ── Local PS estimation on this subpopulation ────────────────────────
+# Integration of the cleaned variable into the equation
+formula_ps <- as.formula(
+  paste("SODD_num", "~", paste(covariates_adj, collapse = "+"))
+)
+
+ps_model_sodd <- tryCatch({
+  weightit(formula_ps,
+           data     = df_sodd_centres,
+           method   = "ps",
+           estimand = "ATE")
+}, error = function(e) {
+  warning("WeightIt failed: ", conditionMessage(e))
+  NULL
+})
+
+if (is.null(ps_model_sodd)) {
+  stop("Failed to estimate PS on SODD centers.")
+}
+
+df_sodd_centres$PS_local <- ps_model_sodd$ps
+
+cat("─── PS DISTRIBUTION (SODD centers) ──────────────────────────\n")
+cat(sprintf("  Min  : %.3f\n", min(df_sodd_centres$PS_local)))
+cat(sprintf("  Mean : %.3f\n", mean(df_sodd_centres$PS_local)))
+cat(sprintf("  Max  : %.3f\n\n", max(df_sodd_centres$PS_local)))
+
+# ── PS Trimming [0.05 ; 0.95] ────────────────────────────────────────────────
+df_sodd_trim <- df_sodd_centres %>%
+  filter(PS_local >= 0.05, PS_local <= 0.95)
+
+cat(sprintf("N after PS trimming [0.05;0.95]: %d patients\n",
+            nrow(df_sodd_trim)))
+cat(sprintf("N treated  (SODD=1) : %d\n",
+            sum(df_sodd_trim$SODD_num == 1)))
+cat(sprintf("N controls (SODD=0) : %d\n\n",
+            sum(df_sodd_trim$SODD_num == 0)))
+
+if (nrow(df_sodd_trim) < 100) {
+  warning("N < 100 after trimming — results should be interpreted with extreme caution.")
+}
+
+# ── Matrices for the estimators ────────────────────────────────────────────
+dummy_sodd   <- dummyVars(~ ., data = df_sodd_trim[, covariates_adj])
+X_sodd       <- as.matrix(predict(dummy_sodd,
+                                  newdata = df_sodd_trim[, covariates_adj]))
+X_sodd[is.na(X_sodd)] <- 0
+X_sodd_df    <- as.data.frame(X_sodd)
+
+PS_sodd      <- df_sodd_trim$PS_local
+
+# Initialization of ATE results
+ate_results <- data.frame(
+  Approach = character(),
+  Outcome  = character(),
+  Estimate = numeric(),
+  SE       = numeric(),
+  stringsAsFactors = FALSE
+)
+
+add_ate <- function(approach, outcome, est, se) {
+  ate_results <<- rbind(
+    ate_results,
+    data.frame(Approach = approach, Outcome = outcome,
+               Estimate = as.numeric(est), SE = as.numeric(se),
+               stringsAsFactors = FALSE)
+  )
+  cat(sprintf("  ✓ %-30s | %-12s | %.3f (SE: %.3f)\n",
+              approach, outcome, as.numeric(est), as.numeric(se)))
+}
+
+# ── Loop over the 3 outcomes ─────────────────────────────────────────────────
+for (out_name in names(outcomes_lme)) {
+
+  out_var <- outcomes_lme[[out_name]]
+  cat(sprintf("\n─── Outcome : %s ─────────────────────────────────\n", out_name))
+
+  Y_s <- as.numeric(df_sodd_trim[[out_var]])
+  
+  # Integration of the cleaned treated variable
+  W_s <- df_sodd_trim$SODD_num
+  
+  if (any(!W_s %in% c(0, 1)))
+    W_s <- ifelse(W_s == max(W_s), 1, 0)
+
+  # ── GRF ──────────────────────────────────────────────────────────────────
+  tryCatch({
+    set.seed(2026)
+    cf_s   <- causal_forest(X_sodd, Y_s, W_s,
+                            W.hat     = PS_sodd,
+                            num.trees = 2000,
+                            seed      = 2026)
+    cf_ate <- average_treatment_effect(cf_s, target.sample = "all")
+    add_ate("GRF (Causal Forest)", out_name,
+            cf_ate["estimate"], cf_ate["std.err"])
+  }, error = function(e) warning("GRF failed: ", conditionMessage(e)))
+
+  # ── AIPW ─────────────────────────────────────────────────────────────────
+  tryCatch({
+    aipw_s <- AIPW$new(
+      Y            = Y_s,
+      A            = W_s,
+      W            = X_sodd_df,
+      Q.SL.library = "SL.glm",
+      g.SL.library = "SL.glm",
+      k_split      = 3,
+      verbose      = FALSE
+    )
+    suppressWarnings(aipw_s$stratified_fit())
+    aipw_s$summary()
+
+    aipw_r <- tryCatch(
+      aipw_s$result,
+      error = function(e) NULL
+    )
+
+    if (!is.null(aipw_r) && "Mean Difference" %in% rownames(aipw_r)) {
+      add_ate("AIPW (SL.glm)", out_name,
+              aipw_r["Mean Difference", "Estimate"],
+              aipw_r["Mean Difference", "SE"])
+    }
+  }, error = function(e) warning("AIPW failed: ", conditionMessage(e)))
+
+  # ── TMLE ─────────────────────────────────────────────────────────────────
+  tryCatch({
+    tmle_s <- tmle(
+      Y            = Y_s,
+      A            = W_s,
+      W            = X_sodd_df,
+      Q.SL.library = c("SL.glm", "SL.glmnet"),
+      g.SL.library = c("SL.glm", "SL.glmnet")
+    )
+    add_ate("TMLE (SL.glm + glmnet)", out_name,
+            tmle_s$estimates$ATE$psi,
+            sqrt(tmle_s$estimates$ATE$var.psi))
+  }, error = function(e) warning("TMLE failed: ", conditionMessage(e)))
+}
+
+# ── ATE summary table ─────────────────────────────────────────────────
+cat("\n─── ATE SUMMARY TABLE (SODD — exploratory) ──────────────────\n")
+
+ate_results <- ate_results %>%
+  mutate(
+    CI_Lo = Estimate - 1.96 * SE,
+    CI_Hi = Estimate + 1.96 * SE,
+    Significant = ifelse(CI_Lo > 0 | CI_Hi < 0,
+                         "Significant", "NS")
+  )
+
+print(ate_results %>%
+        mutate(across(where(is.numeric), ~ round(., 3))),
+      row.names = FALSE)
+
+write.csv(ate_results,
+          "CLEAN_VAP_outputs/SODD/ate_results_SODD_implementing_centres.csv",
+          row.names = FALSE)
+
+# ── ATE Forest plot by outcome ───────────────────────────────────────────────
+p_ate <- ggplot(
+  ate_results,
+  aes(x = Estimate, y = Approach, colour = Significant)
+) +
+  geom_vline(xintercept = 0, linetype = "dashed",
+             colour = "darkred", linewidth = 0.8) +
+  geom_errorbarh(aes(xmin = CI_Lo, xmax = CI_Hi),
+                 height = 0.25, linewidth = 0.9) +
+  geom_point(size = 4, shape = 21,
+             aes(fill = Significant), colour = "white") +
+  scale_colour_manual(values = c("Significant" = "#E74C3C",
+                                 "NS"          = "#7F8C8D")) +
+  scale_fill_manual(  values = c("Significant" = "#E74C3C",
+                                 "NS"          = "#7F8C8D")) +
+  facet_wrap(~ Outcome, scales = "free_x", ncol = 3) +
+  labs(
+    title    = "SODD — Average Treatment Effect (Exploratory)",
+    subtitle = paste0("Restricted to SODD-implementing centers | ",
+                      "PS-trimmed [0.05;0.95] | N=",
+                      nrow(df_sodd_trim)),
+    x        = "Estimated ATE (95% CI)",
+    y        = NULL,
+    colour   = NULL, fill = NULL,
+    caption  = paste0(
+      "Exploratory analysis — Supplementary Material\n",
+      "Caution: limited sample size in implementing centers"
+    )
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    plot.title      = element_text(face = "plain"),
+    legend.position = "bottom",
+    strip.text      = element_text(face = "plain")
+  )
+
+print(p_ate)
+ggsave("CLEAN_VAP_outputs/SODD/fig_ate_forest_SODD_implementing.pdf",
+       p_ate, width = 12, height = 5)
+
+# =============================================================================
+# END
+# =============================================================================
+cat("\n=============================================================\n")
+cat("  SODD ANALYSIS COMPLETED\n")
+cat("  Outputs : CLEAN_VAP_outputs/SODD/\n")
+cat("  - table1_patient_SODD_vs_nonSODD.csv\n")
+cat("  - table1_centre_level_SODD.csv\n")
+cat("  - lme_results_SODD_ATE.csv\n")
+cat("  - ate_results_SODD_implementing_centres.csv\n")
+cat("  - fig_outcomes_SODD_vs_nonSODD.pdf\n")
+cat("  - fig_lme_forest_SODD.pdf\n")
+cat("  - fig_ate_forest_SODD_implementing.pdf\n")
+cat("=============================================================\n")
+```
+
+
+
+
+
